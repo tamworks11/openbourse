@@ -1,0 +1,77 @@
+Screen {
+    background: $surface;
+}
+
+#status-bar {
+    dock: top;
+    height: 2;
+    background: $boost;
+    color: $text;
+    padding: 0 1;
+}
+
+#status-bar .left {
+    width: 1fr;
+}
+
+#status-bar .right {
+    width: auto;
+    text-align: right;
+}
+
+#screen-meta {
+    height: auto;
+    padding: 1 2;
+}
+
+#screen-meta .label {
+    color: $accent;
+    text-style: bold;
+}
+
+#stats {
+    color: $text-muted;
+    padding: 0 2;
+}
+
+#section-heading {
+    color: $warning;
+    text-style: bold;
+    padding: 1 2 0 2;
+}
+
+#candidates {
+    height: 1fr;
+    margin: 0 2;
+}
+
+#footer-bar {
+    dock: bottom;
+    height: 1;
+    background: $boost;
+    color: $text-muted;
+    padding: 0 2;
+}
+
+#command-prompt {
+    dock: bottom;
+    height: 3;
+    margin: 0 2;
+}
+
+#command-prompt Input {
+    border: tall $accent;
+}
+
+.verdict-strong {
+    color: $success;
+    text-style: bold;
+}
+
+.verdict-interesting {
+    color: $warning;
+}
+
+.verdict-pass {
+    color: $text-muted;
+}

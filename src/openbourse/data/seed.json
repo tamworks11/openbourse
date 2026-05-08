@@ -1,0 +1,31 @@
+{
+  "instruments": [
+    {"ticker": "CDNS", "name": "Cadence Design Systems", "sector": "Technology", "exchange": "NASDAQ", "cik": "0000813672"},
+    {"ticker": "VEEV", "name": "Veeva Systems",          "sector": "Healthcare",  "exchange": "NYSE",   "cik": "0001393052"},
+    {"ticker": "FICO", "name": "Fair Isaac",             "sector": "Technology",  "exchange": "NYSE",   "cik": "0000814547"},
+    {"ticker": "MSCI", "name": "MSCI Inc.",              "sector": "Financials",  "exchange": "NYSE",   "cik": "0001408198"},
+    {"ticker": "ANET", "name": "Arista Networks",        "sector": "Technology",  "exchange": "NYSE",   "cik": "0001596532"},
+    {"ticker": "SNPS", "name": "Synopsys",               "sector": "Technology",  "exchange": "NASDAQ", "cik": "0000883241"},
+    {"ticker": "PAYC", "name": "Paycom Software",        "sector": "Technology",  "exchange": "NYSE",   "cik": "0001590955"},
+    {"ticker": "TYL",  "name": "Tyler Technologies",     "sector": "Technology",  "exchange": "NYSE",   "cik": "0000860731"},
+    {"ticker": "WMT",  "name": "Walmart",                "sector": "Staples",     "exchange": "NYSE",   "cik": "0000104169"},
+    {"ticker": "F",    "name": "Ford Motor Company",     "sector": "Discretionary","exchange": "NYSE",  "cik": "0000037996"}
+  ],
+  "fundamentals": [
+    {"ticker": "CDNS", "as_of": "2026-04-30", "market_cap_usd": 78200000000, "revenue_growth_pct": 18.4, "gross_margin_pct": 89.1, "net_debt_to_ebitda": 0.2, "fcf_yield_pct": 2.8},
+    {"ticker": "VEEV", "as_of": "2026-04-30", "market_cap_usd": 32800000000, "revenue_growth_pct": 16.1, "gross_margin_pct": 74.2, "net_debt_to_ebitda": 0.0, "fcf_yield_pct": 3.4},
+    {"ticker": "FICO", "as_of": "2026-04-30", "market_cap_usd": 42100000000, "revenue_growth_pct": 15.7, "gross_margin_pct": 81.5, "net_debt_to_ebitda": 0.6, "fcf_yield_pct": 2.1},
+    {"ticker": "MSCI", "as_of": "2026-04-30", "market_cap_usd": 45600000000, "revenue_growth_pct": 15.2, "gross_margin_pct": 82.8, "net_debt_to_ebitda": 0.9, "fcf_yield_pct": 2.6},
+    {"ticker": "ANET", "as_of": "2026-04-30", "market_cap_usd": 96400000000, "revenue_growth_pct": 22.8, "gross_margin_pct": 63.4, "net_debt_to_ebitda": 0.0, "fcf_yield_pct": 3.1},
+    {"ticker": "SNPS", "as_of": "2026-04-30", "market_cap_usd": 84700000000, "revenue_growth_pct": 15.0, "gross_margin_pct": 80.7, "net_debt_to_ebitda": 0.1, "fcf_yield_pct": 2.4},
+    {"ticker": "PAYC", "as_of": "2026-04-30", "market_cap_usd": 11200000000, "revenue_growth_pct": 15.5, "gross_margin_pct": 85.1, "net_debt_to_ebitda": 0.0, "fcf_yield_pct": 4.2},
+    {"ticker": "TYL",  "as_of": "2026-04-30", "market_cap_usd": 24800000000, "revenue_growth_pct": 15.9, "gross_margin_pct": 44.3, "net_debt_to_ebitda": 0.7, "fcf_yield_pct": 2.0},
+    {"ticker": "WMT",  "as_of": "2026-04-30", "market_cap_usd": 520000000000, "revenue_growth_pct": 5.4, "gross_margin_pct": 24.1, "net_debt_to_ebitda": 1.2, "fcf_yield_pct": 2.8},
+    {"ticker": "F",    "as_of": "2026-04-30", "market_cap_usd": 48000000000, "revenue_growth_pct": 3.1, "gross_margin_pct": 8.5,  "net_debt_to_ebitda": 6.4, "fcf_yield_pct": 4.0}
+  ],
+  "filings": [
+    {"cik": "0000813672", "form_type": "10-Q",  "filed_at": "2026-04-22", "accession_number": "0000813672-26-000017", "url": "https://www.sec.gov/Archives/edgar/data/813672/000081367226000017/cdns-20260331.htm", "title": "Quarterly report"},
+    {"cik": "0001393052", "form_type": "10-Q",  "filed_at": "2026-04-30", "accession_number": "0001393052-26-000022", "url": "https://www.sec.gov/Archives/edgar/data/1393052/000139305226000022/veev-20260430.htm", "title": "Quarterly report"},
+    {"cik": "0001596532", "form_type": "10-Q",  "filed_at": "2026-04-29", "accession_number": "0001596532-26-000031", "url": "https://www.sec.gov/Archives/edgar/data/1596532/000159653226000031/anet-20260330.htm", "title": "Quarterly report"}
+  ]
+}

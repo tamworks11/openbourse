@@ -1,0 +1,90 @@
+"""Tests for the screening orchestration service."""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from datetime import date
+
+import pytest
+
+from openbourse.domain import FundamentalsSnapshot, Instrument, Verdict
+from openbourse.screening import BUILTIN_SCREENS, ScreeningService
+
+
+@pytest.fixture
+def diverse_universe(
+    sample_instrument: Instrument,
+    sample_snapshot: FundamentalsSnapshot,
+    low_quality_snapshot: FundamentalsSnapshot,
+) -> list[tuple[Instrument, FundamentalsSnapshot]]:
+    weak = Instrument(ticker="F", name="Ford Motor Company")
+    middling_inst = Instrument(ticker="VEEV", name="Veeva Systems")
+    middling_snap = replace(
+        sample_snapshot, ticker="VEEV", market_cap_usd=32_800_000_000, revenue_growth_pct=16.1
+    )
+    return [
+        (sample_instrument, sample_snapshot),
+        (middling_inst, middling_snap),
+        (weak, low_quality_snapshot),
+    ]
+
+
+def test_service_excludes_failing_candidates(
+    diverse_universe: list[tuple[Instrument, FundamentalsSnapshot]],
+) -> None:
+    result = ScreeningService().run(BUILTIN_SCREENS["quality_compounders"], diverse_universe)
+    tickers = {c.instrument.ticker for c in result.candidates}
+    assert "F" not in tickers
+    assert "CDNS" in tickers
+
+
+def test_service_sorts_by_score_descending(
+    diverse_universe: list[tuple[Instrument, FundamentalsSnapshot]],
+) -> None:
+    result = ScreeningService().run(BUILTIN_SCREENS["quality_compounders"], diverse_universe)
+    scores = [c.score for c in result.candidates]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_service_records_universe_size(
+    diverse_universe: list[tuple[Instrument, FundamentalsSnapshot]],
+) -> None:
+    result = ScreeningService().run(BUILTIN_SCREENS["quality_compounders"], diverse_universe)
+    assert result.universe_size == len(diverse_universe)
+
+
+def test_service_assigns_verdict(
+    diverse_universe: list[tuple[Instrument, FundamentalsSnapshot]],
+) -> None:
+    result = ScreeningService().run(BUILTIN_SCREENS["quality_compounders"], diverse_universe)
+    assert all(isinstance(c.verdict, Verdict) for c in result.candidates)
+
+
+def test_empty_universe_yields_zero_candidates() -> None:
+    result = ScreeningService().run(BUILTIN_SCREENS["quality_compounders"], [])
+    assert result.universe_size == 0
+    assert result.filtered_count == 0
+
+
+def test_ran_at_is_set() -> None:
+    result = ScreeningService().run(BUILTIN_SCREENS["quality_compounders"], [])
+    assert result.ran_at.tzinfo is not None
+    assert result.ran_at.year >= 2026
+
+
+def test_tie_break_is_alphabetical_by_ticker() -> None:
+    snap = FundamentalsSnapshot(
+        ticker="A",
+        as_of=date(2026, 4, 30),
+        market_cap_usd=10_000_000_000,
+        revenue_growth_pct=20.0,
+        gross_margin_pct=80.0,
+        net_debt_to_ebitda=0.5,
+        fcf_yield_pct=3.0,
+    )
+    universe = [
+        (Instrument(ticker="ZZZ", name="Z Corp"), replace(snap, ticker="ZZZ")),
+        (Instrument(ticker="AAA", name="A Corp"), replace(snap, ticker="AAA")),
+    ]
+    result = ScreeningService().run(BUILTIN_SCREENS["quality_compounders"], universe)
+    assert [c.instrument.ticker for c in result.candidates] == ["AAA", "ZZZ"]
