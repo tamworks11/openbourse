@@ -68,6 +68,11 @@ poetry run bourse db migrate
 poetry run bourse db seed
 ```
 
+> The compose service binds Postgres to host port **5433** by default to
+> avoid colliding with any other Postgres you already have on 5432. Override
+> with `OPENBOURSE_PG_HOST_PORT` in `.env` and update `OPENBOURSE_DATABASE_URL`
+> to match.
+
 ### Launch the TUI
 
 ```bash
@@ -79,13 +84,18 @@ Press `?` inside the app for keybindings.
 ## CLI
 
 ```text
-bourse run                Launch the TUI.
-bourse db migrate         Apply Alembic migrations to the configured DB.
-bourse db seed            Load the bundled fixture dataset.
-bourse screen list        Show available screens (text mode, no TUI).
-bourse screen run NAME    Run a screen and print results as JSON.
-bourse version            Print version and exit.
+bourse run                  Launch the TUI.
+bourse lookup TICKER        Look up fundamentals for a single ticker.
+bourse lookup TICKER -b     Same, plus an AI-generated brief.
+bourse db migrate           Apply Alembic migrations to the configured DB.
+bourse db seed              Load the bundled fixture dataset.
+bourse screen list          Show available screens (text mode, no TUI).
+bourse screen run NAME      Run a screen and print results as a table or JSON.
+bourse version              Print version and exit.
 ```
+
+Inside the TUI press `/` to open a ticker-lookup prompt — same pipeline,
+just keyboard-driven.
 
 All commands respect the `OPENBOURSE_*` environment variables in `.env`.
 

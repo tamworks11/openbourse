@@ -28,18 +28,19 @@ class BriefScreen(Screen[None]):
         self._providers = providers
 
     def compose(self) -> ComposeResult:
-        """Render the header, a loading indicator, and the brief body container."""
+        """Render a full-width header, a loading indicator, and the brief body."""
         c = self._candidate
         snap = c.snapshot
         header = (
-            f"[b]{c.instrument.ticker}[/b] — {c.instrument.name}    "
-            f"[dim]{c.instrument.sector or ''}[/dim]\n"
-            f"Market cap: ${snap.market_cap_usd / 1e9:.1f}B  ·  "
-            f"Revenue growth: {snap.revenue_growth_pct:+.1f}%  ·  "
-            f"Gross margin: {snap.gross_margin_pct:.1f}%  ·  "
-            f"Net debt/EBITDA: {snap.net_debt_to_ebitda:.2f}x  ·  "
-            f"FCF yield: {snap.fcf_yield_pct:.1f}%\n"
-            f"Score: [b]{c.score}[/b]    Verdict: [b]{c.verdict.value}[/b]"
+            f"[b cyan]{c.instrument.ticker}[/b cyan]  {c.instrument.name}  "
+            f"[dim]{c.instrument.sector or ''}  ·  "
+            f"{c.instrument.exchange or ''}[/dim]\n"
+            f"Mkt cap [b]${snap.market_cap_usd / 1e9:.1f}B[/b]  ·  "
+            f"Rev growth [b]{snap.revenue_growth_pct:+.1f}%[/b]  ·  "
+            f"GM [b]{snap.gross_margin_pct:.1f}%[/b]  ·  "
+            f"Net debt/EBITDA [b]{snap.net_debt_to_ebitda:.2f}x[/b]  ·  "
+            f"FCF yld [b]{snap.fcf_yield_pct:.1f}%[/b]\n"
+            f"Score [b]{c.score}[/b]    Verdict [b]{c.verdict.value}[/b]"
         )
         yield Static(header, id="brief-header")
         yield LoadingIndicator(id="brief-loading")

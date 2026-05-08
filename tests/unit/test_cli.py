@@ -48,3 +48,34 @@ def test_screen_run_json_output(monkeypatch) -> None:
     result = runner.invoke(app, ["screen", "run", "quality_compounders", "--output", "json"])
     assert result.exit_code == 0
     assert '"candidates"' in result.stdout
+
+
+def test_lookup_known_ticker_prints_table() -> None:
+    result = runner.invoke(app, ["lookup", "CDNS"])
+    assert result.exit_code == 0
+    assert "CDNS" in result.stdout
+    assert "Score" in result.stdout
+    assert "Verdict" in result.stdout
+
+
+def test_lookup_unknown_ticker_exits_nonzero() -> None:
+    result = runner.invoke(app, ["lookup", "ZZZZ"])
+    assert result.exit_code == 1
+    assert "unknown ticker" in result.stdout.lower()
+
+
+def test_lookup_with_brief_includes_summary() -> None:
+    result = runner.invoke(app, ["lookup", "CDNS", "--brief"])
+    assert result.exit_code == 0
+    assert "Summary" in result.stdout
+
+
+def test_lookup_json_output_is_machine_readable() -> None:
+    import json
+
+    result = runner.invoke(app, ["lookup", "CDNS", "--output", "json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["instrument"]["ticker"] == "CDNS"
+    assert "score" in payload
+    assert "verdict" in payload

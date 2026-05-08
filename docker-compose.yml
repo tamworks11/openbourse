@@ -7,7 +7,9 @@ services:
       POSTGRES_PASSWORD: openbourse
       POSTGRES_DB: openbourse
     ports:
-      - "5432:5432"
+      # Host port is 5433 by default to avoid collisions with another local
+      # Postgres on 5432. Override with OPENBOURSE_PG_HOST_PORT in .env.
+      - "${OPENBOURSE_PG_HOST_PORT:-5433}:5432"
     volumes:
       - openbourse-pg-data:/var/lib/postgresql/data
     healthcheck:

@@ -1,5 +1,10 @@
+/* Bloomberg-inspired full-bleed layout: zero margins, hard borders, dense
+   colour cues. Anything that should look amber/green/red maps onto Textual's
+   $warning / $success / $error so it picks up theme variants. */
+
 Screen {
     background: $surface;
+    padding: 0;
 }
 
 #status-bar {
@@ -8,6 +13,7 @@ Screen {
     background: $boost;
     color: $text;
     padding: 0 1;
+    border-bottom: solid $accent;
 }
 
 #status-bar .left {
@@ -19,48 +25,80 @@ Screen {
     text-align: right;
 }
 
+#top-row {
+    height: 9;
+    border-bottom: solid $accent;
+}
+
 #screen-meta {
-    height: auto;
-    padding: 1 2;
+    width: 1fr;
+    padding: 0 1;
+    border-right: solid $accent;
 }
 
 #screen-meta .label {
-    color: $accent;
+    color: $warning;
     text-style: bold;
 }
 
 #stats {
     color: $text-muted;
-    padding: 0 2;
+}
+
+#detail-pane {
+    width: 50%;
+    padding: 0 1;
+}
+
+#detail-pane Static {
+    width: 1fr;
 }
 
 #section-heading {
+    height: 1;
+    background: $boost;
     color: $warning;
     text-style: bold;
-    padding: 1 2 0 2;
+    padding: 0 1;
 }
 
 #candidates {
     height: 1fr;
-    margin: 0 2;
+    margin: 0;
 }
 
-#footer-bar {
-    dock: bottom;
-    height: 1;
+#candidates > .datatable--header {
     background: $boost;
-    color: $text-muted;
-    padding: 0 2;
+    color: $warning;
+    text-style: bold;
 }
 
-#command-prompt {
+#candidates > .datatable--cursor {
+    background: $accent 30%;
+}
+
+#command-bar {
     dock: bottom;
     height: 3;
-    margin: 0 2;
+    border-top: solid $accent;
+    background: $boost;
 }
 
-#command-prompt Input {
-    border: tall $accent;
+#command-bar Input {
+    border: none;
+    background: $boost;
+}
+
+#command-bar Input:focus {
+    background: $surface;
+}
+
+#footer-keys {
+    dock: bottom;
+    height: 1;
+    background: $panel;
+    color: $text-muted;
+    padding: 0 1;
 }
 
 .verdict-strong {
@@ -74,4 +112,41 @@ Screen {
 
 .verdict-pass {
     color: $text-muted;
+}
+
+.verdict-reject {
+    color: $error;
+}
+
+/* Brief screen — also full-bleed. */
+#brief-header {
+    height: auto;
+    padding: 0 1;
+    background: $boost;
+    border-bottom: solid $accent;
+}
+
+#brief-scroll {
+    padding: 1;
+}
+
+#brief-loading {
+    height: 3;
+}
+
+/* Lookup modal — kept as a fallback when the command bar can't be reached. */
+LookupScreen {
+    align: center middle;
+}
+
+LookupScreen > Vertical {
+    background: $boost;
+    border: tall $accent;
+    padding: 1 2;
+    width: 50;
+    height: auto;
+}
+
+LookupScreen Label {
+    padding: 0 0 1 0;
 }

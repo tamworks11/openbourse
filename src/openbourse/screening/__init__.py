@@ -1,6 +1,7 @@
 """Screening domain — criteria, scoring, orchestration."""
 
 from openbourse.screening.criteria import BUILTIN_SCREENS, passes_screen
+from openbourse.screening.lookup import TickerLookupError, lookup_candidate
 from openbourse.screening.scoring import (
     SCORE_MAX,
     VERDICT_THRESHOLDS,
@@ -15,8 +16,10 @@ __all__ = [
     "SCORE_MAX",
     "VERDICT_THRESHOLDS",
     "ScreeningService",
+    "TickerLookupError",
     "Weights",
     "composite_score",
+    "lookup_candidate",
     "passes_screen",
     "verdict_for",
 ]
