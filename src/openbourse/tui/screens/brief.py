@@ -15,6 +15,8 @@ from openbourse.providers import Providers
 
 
 class BriefScreen(Screen[None]):
+    """Per-instrument detail screen — fundamentals header + AI-authored brief."""
+
     BINDINGS: ClassVar[list[BindingType]] = [
         ("escape", "app.pop_screen", "Back"),
         ("b", "app.pop_screen", "Back"),
@@ -26,6 +28,7 @@ class BriefScreen(Screen[None]):
         self._providers = providers
 
     def compose(self) -> ComposeResult:
+        """Render the header, a loading indicator, and the brief body container."""
         c = self._candidate
         snap = c.snapshot
         header = (
@@ -44,6 +47,7 @@ class BriefScreen(Screen[None]):
         yield Footer()
 
     async def on_mount(self) -> None:
+        """Kick off the brief-loading worker so the UI stays responsive."""
         self.run_worker(self._load_brief(), exclusive=True)
 
     async def _load_brief(self) -> None:

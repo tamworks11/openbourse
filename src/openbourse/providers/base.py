@@ -35,14 +35,18 @@ class Filing:
 class FundamentalsProvider(Protocol):
     """Fetches fundamentals for a single instrument."""
 
-    async def fetch(self, ticker: str) -> FundamentalsSnapshot: ...
+    async def fetch(self, ticker: str) -> FundamentalsSnapshot:
+        """Return the most recent :class:`FundamentalsSnapshot` for ``ticker``."""
+        ...
 
 
 @runtime_checkable
 class FilingsProvider(Protocol):
     """Fetches recent filings for an instrument's CIK."""
 
-    async def recent_filings(self, cik: str, *, limit: int = 5) -> list[Filing]: ...
+    async def recent_filings(self, cik: str, *, limit: int = 5) -> list[Filing]:
+        """Return up to ``limit`` recent filings for ``cik``, newest first."""
+        ...
 
 
 @runtime_checkable
@@ -54,7 +58,9 @@ class BriefProvider(Protocol):
         instrument: Instrument,
         snapshot: FundamentalsSnapshot,
         filings: list[Filing] | None = None,
-    ) -> AiBrief: ...
+    ) -> AiBrief:
+        """Return an :class:`AiBrief` summarising the instrument and its filings."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)

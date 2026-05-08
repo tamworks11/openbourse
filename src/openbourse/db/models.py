@@ -27,6 +27,8 @@ class Base(DeclarativeBase):
 
 
 class InstrumentRow(Base):
+    """Persistence record for a publicly traded equity (the master ticker list)."""
+
     __tablename__ = "instruments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -48,6 +50,12 @@ class InstrumentRow(Base):
 
 
 class FundamentalsRow(Base):
+    """Point-in-time financial ratios for an instrument.
+
+    The ``(instrument_id, as_of)`` composite is unique so re-running an
+    ingestion overwrites — not duplicates — the same trading day's snapshot.
+    """
+
     __tablename__ = "fundamentals_snapshots"
     __table_args__ = (
         UniqueConstraint("instrument_id", "as_of", name="uq_fundamentals_instrument_as_of"),
@@ -70,6 +78,8 @@ class FundamentalsRow(Base):
 
 
 class ScreenRow(Base):
+    """A persisted screen definition with its threshold criteria as JSON."""
+
     __tablename__ = "screens"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -86,6 +96,8 @@ class ScreenRow(Base):
 
 
 class ScreenRunRow(Base):
+    """Audit record of a single screen execution: when, against how many, what came out."""
+
     __tablename__ = "screen_runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -103,6 +115,8 @@ class ScreenRunRow(Base):
 
 
 class WatchlistRow(Base):
+    """A user-curated watchlist entry with optional free-form notes."""
+
     __tablename__ = "watchlist_entries"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -114,6 +128,12 @@ class WatchlistRow(Base):
 
 
 class AiBriefRow(Base):
+    """Cached AI-generated qualitative brief for an instrument.
+
+    Stored separately from the snapshot so we can regenerate a brief without
+    re-fetching fundamentals, and vice versa.
+    """
+
     __tablename__ = "ai_briefs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

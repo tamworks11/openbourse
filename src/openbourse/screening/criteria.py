@@ -35,7 +35,6 @@ BUILTIN_SCREENS: dict[str, ScreenDefinition] = {
 
 def passes_screen(snapshot: FundamentalsSnapshot, screen: ScreenDefinition) -> bool:
     """Return True iff ``snapshot`` satisfies every threshold in ``screen``."""
-
     return (
         snapshot.revenue_growth_pct >= screen.min_revenue_growth_pct
         and snapshot.gross_margin_pct >= screen.min_gross_margin_pct

@@ -29,7 +29,6 @@ def create_engine_from_url(url: str, *, echo: bool = False) -> AsyncEngine:
     SQLite URLs use a static pool so an in-memory database can be shared
     across connections within a single test process.
     """
-
     if url.startswith("sqlite"):
         from sqlalchemy.pool import StaticPool
 
@@ -45,7 +44,6 @@ def create_engine_from_url(url: str, *, echo: bool = False) -> AsyncEngine:
 
 def get_engine() -> AsyncEngine:
     """Return the process-wide engine, creating it from settings on first use."""
-
     global _engine
     if _engine is None:
         _engine = create_engine_from_url(get_settings().database_url)
@@ -56,7 +54,6 @@ def get_session_factory(
     engine: AsyncEngine | None = None,
 ) -> async_sessionmaker[AsyncSession]:
     """Return (and cache) a session factory bound to ``engine``."""
-
     global _session_factory
     if engine is not None:
         return async_sessionmaker(engine, expire_on_commit=False)
@@ -70,7 +67,6 @@ async def session_scope(
     factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> AsyncIterator[AsyncSession]:
     """Yield a session that commits on exit, rolls back on exception."""
-
     factory = factory or get_session_factory()
     async with factory() as session:
         try:
@@ -83,7 +79,6 @@ async def session_scope(
 
 async def dispose_engine() -> None:
     """Tear down the cached engine. Call once on application shutdown."""
-
     global _engine, _session_factory
     if _engine is not None:
         await _engine.dispose()

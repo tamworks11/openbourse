@@ -47,6 +47,12 @@ class ClaudeBriefProvider:
         snapshot: FundamentalsSnapshot,
         filings: list[Filing] | None = None,
     ) -> AiBrief:
+        """Render the prompt, call Claude, and parse the response into a brief.
+
+        The system prompt is marked ``cache_control: ephemeral`` so every brief
+        in a session reuses the cached prefix and pays only for the user-side
+        delta in tokens.
+        """
         user_text = _render_prompt(instrument, snapshot, filings or [])
         message = await self._client.messages.create(
             model=self._model,
@@ -96,7 +102,6 @@ def _render_prompt(
 
 def _split_brief(text: str) -> tuple[str, list[str]]:
     """Best-effort parse of the model's response into summary + bullets."""
-
     summary_lines: list[str] = []
     bullets: list[str] = []
     for raw_line in text.splitlines():
@@ -124,6 +129,7 @@ class StubBriefProvider:
         snapshot: FundamentalsSnapshot,
         filings: list[Filing] | None = None,
     ) -> AiBrief:
+        """Return a deterministic, formula-generated brief for offline use."""
         summary = (
             f"{instrument.name} ({instrument.ticker}) — "
             f"{snapshot.gross_margin_pct:.0f}% gross margin business growing revenue "

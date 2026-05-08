@@ -44,6 +44,7 @@ class EdgarFilingsProvider:
         self._owns_client = client is None
 
     async def recent_filings(self, cik: str, *, limit: int = 5) -> list[Filing]:
+        """Fetch the EDGAR submissions feed for ``cik`` and return ``limit`` filings."""
         padded = _zero_pad_cik(cik)
         url = EDGAR_SUBMISSIONS_URL.format(cik=padded)
         response = await self._client.get(url)
@@ -51,6 +52,7 @@ class EdgarFilingsProvider:
         return _parse_submissions(padded, response.json(), limit=limit)
 
     async def aclose(self) -> None:
+        """Close the underlying HTTP client if this provider owns it."""
         if self._owns_client:
             await self._client.aclose()
 
@@ -91,6 +93,7 @@ class StubFilingsProvider:
         self._fixture = fixture or _load_default_fixture()
 
     async def recent_filings(self, cik: str, *, limit: int = 5) -> list[Filing]:
+        """Return up to ``limit`` fixture filings for ``cik`` (empty list if unknown)."""
         padded = _zero_pad_cik(cik)
         return self._fixture.get(padded, [])[:limit]
 

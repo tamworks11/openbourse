@@ -42,6 +42,11 @@ class InstrumentRepository:
         self.session = session
 
     async def upsert(self, instrument: Instrument) -> InstrumentRow:
+        """Insert ``instrument`` or update the existing row sharing its ticker.
+
+        Returns the persisted ORM row so callers can read its newly assigned
+        primary key.
+        """
         existing = await self.session.scalar(
             select(InstrumentRow).where(InstrumentRow.ticker == instrument.ticker)
         )
@@ -63,12 +68,14 @@ class InstrumentRepository:
         return existing
 
     async def get_by_ticker(self, ticker: str) -> Instrument | None:
+        """Return the instrument matching ``ticker`` (case-insensitive) or None."""
         row = await self.session.scalar(
             select(InstrumentRow).where(InstrumentRow.ticker == ticker.upper())
         )
         return _to_instrument(row) if row else None
 
     async def list_all(self) -> list[Instrument]:
+        """Return every instrument, alphabetised by ticker."""
         rows = (
             await self.session.scalars(select(InstrumentRow).order_by(InstrumentRow.ticker))
         ).all()
@@ -82,6 +89,12 @@ class FundamentalsRepository:
         self.session = session
 
     async def upsert(self, instrument_id: int, snapshot: FundamentalsSnapshot) -> None:
+        """Insert or update the snapshot for ``(instrument_id, snapshot.as_of)``.
+
+        Dispatches on the active dialect because Postgres and SQLite use
+        different ``INSERT ... ON CONFLICT`` syntaxes; SQLAlchemy can't paper
+        over that with a single statement builder.
+        """
         bind = self.session.get_bind()
         dialect_name = bind.dialect.name if bind is not None else ""
 
@@ -115,7 +128,6 @@ class FundamentalsRepository:
 
     async def latest_for_all(self) -> list[tuple[Instrument, FundamentalsSnapshot]]:
         """Return the most recent snapshot for every instrument that has one."""
-
         stmt = (
             select(InstrumentRow, FundamentalsRow)
             .join(FundamentalsRow, FundamentalsRow.instrument_id == InstrumentRow.id)
@@ -138,6 +150,7 @@ class WatchlistRepository:
         self.session = session
 
     async def add(self, ticker: str, notes: str | None = None) -> None:
+        """Add ``ticker`` to the watchlist, or update its notes if already present."""
         existing = await self.session.scalar(
             select(WatchlistRow).where(WatchlistRow.ticker == ticker.upper())
         )
@@ -147,6 +160,7 @@ class WatchlistRepository:
             existing.notes = notes
 
     async def remove(self, ticker: str) -> bool:
+        """Remove ``ticker`` from the watchlist. Returns True if a row was deleted."""
         row = await self.session.scalar(
             select(WatchlistRow).where(WatchlistRow.ticker == ticker.upper())
         )
@@ -156,6 +170,7 @@ class WatchlistRepository:
         return True
 
     async def list_tickers(self) -> list[str]:
+        """Return every watchlisted ticker, alphabetised."""
         rows = (
             await self.session.scalars(select(WatchlistRow.ticker).order_by(WatchlistRow.ticker))
         ).all()

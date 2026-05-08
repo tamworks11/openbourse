@@ -27,21 +27,26 @@ class StatusBar(Horizontal):
         self._right = Static("", classes="right", id="status-right")
 
     def compose(self) -> Iterable[Static]:
+        """Yield the left (title/path) and right (providers/clock) halves."""
         yield self._left
         yield self._right
 
     def on_mount(self) -> None:
+        """Schedule the once-per-second clock tick and paint the initial text."""
         self.set_interval(1.0, self._tick)
         self._refresh_text()
 
     def _tick(self) -> None:
+        """Advance the displayed clock; the reactive watcher then repaints."""
         self.now = datetime.now(UTC)
         self._refresh_text()
 
     def watch_now(self, _: datetime) -> None:
+        """Reactive hook — repaint whenever the ``now`` attribute changes."""
         self._refresh_text()
 
     def set_screen_path(self, path: str) -> None:
+        """Update the ``screen://...`` indicator shown on the left half."""
         self._screen_path = path
         self._refresh_text()
 

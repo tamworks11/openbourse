@@ -32,6 +32,11 @@ class ScreeningService:
         screen: ScreenDefinition,
         universe: Iterable[tuple[Instrument, FundamentalsSnapshot]],
     ) -> ScreenResult:
+        """Filter ``universe`` by ``screen``, score the survivors, and return them.
+
+        Candidates are returned sorted by score descending; ties break on
+        ticker ascending so the order is deterministic across runs.
+        """
         rows = list(universe)
         candidates: list[Candidate] = []
         for instrument, snapshot in rows:

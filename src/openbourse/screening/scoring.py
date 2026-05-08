@@ -56,31 +56,26 @@ def _clip(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
 
 def normalize_growth(revenue_growth_pct: float) -> float:
     """Map revenue growth % to ``[0, 1]``. Caps at 30%."""
-
     return _clip(revenue_growth_pct / 30.0)
 
 
 def normalize_margin(gross_margin_pct: float) -> float:
     """Map gross margin % to ``[0, 1]``."""
-
     return _clip(gross_margin_pct / 100.0)
 
 
 def normalize_leverage(net_debt_to_ebitda: float) -> float:
     """Lower leverage scores higher. ``0.0x → 1.0``, ``≥3.0x → 0.0``."""
-
     return _clip(1.0 - net_debt_to_ebitda / 3.0)
 
 
 def normalize_fcf_yield(fcf_yield_pct: float) -> float:
     """Map FCF yield % to ``[0, 1]``. Caps at 8%."""
-
     return _clip(fcf_yield_pct / 8.0)
 
 
 def normalize_size(market_cap_usd: float) -> float:
     """Log-scaled market cap. ``$1B → 0.0``, ``≥$100B → 1.0``."""
-
     if market_cap_usd <= 1_000_000_000:
         return 0.0
     cap_b = market_cap_usd / 1_000_000_000
@@ -89,7 +84,6 @@ def normalize_size(market_cap_usd: float) -> float:
 
 def composite_score(snapshot: FundamentalsSnapshot, *, weights: Weights = DEFAULT_WEIGHTS) -> int:
     """Return an integer 0-100 composite score for ``snapshot``."""
-
     components = (
         normalize_growth(snapshot.revenue_growth_pct) * weights.growth
         + normalize_margin(snapshot.gross_margin_pct) * weights.margin
@@ -106,7 +100,6 @@ def verdict_for(score: int) -> Verdict:
     Scores at or above the ``STRONG_INTEREST`` threshold map to that verdict;
     falling thresholds drop into ``INTERESTING``, ``PASS``, then ``REJECT``.
     """
-
     if score >= VERDICT_THRESHOLDS[Verdict.STRONG_INTEREST]:
         return Verdict.STRONG_INTEREST
     if score >= VERDICT_THRESHOLDS[Verdict.INTERESTING]:

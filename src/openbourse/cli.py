@@ -46,7 +46,6 @@ console = Console()
 @app.command()
 def version() -> None:
     """Print the installed openbourse version."""
-
     console.print(f"openbourse {__version__}")
 
 
@@ -57,7 +56,6 @@ def run(
     ),
 ) -> None:
     """Launch the Textual TUI."""
-
     if screen_name not in BUILTIN_SCREENS:
         raise typer.BadParameter(f"Unknown screen {screen_name!r}")
 
@@ -70,7 +68,6 @@ def run(
 @db_app.command("migrate")
 def db_migrate() -> None:
     """Apply Alembic migrations to the configured database."""
-
     from alembic import command
     from alembic.config import Config
 
@@ -83,7 +80,6 @@ def db_migrate() -> None:
 @db_app.command("seed")
 def db_seed() -> None:
     """Load the bundled seed dataset into the configured database."""
-
     asyncio.run(_seed())
     console.print("[green]seed loaded[/green]")
 
@@ -91,7 +87,6 @@ def db_seed() -> None:
 @screen_app.command("list")
 def screen_list() -> None:
     """List built-in screens."""
-
     table = Table(title="Built-in screens", show_lines=False)
     table.add_column("name", style="cyan")
     table.add_column("description")
@@ -106,7 +101,6 @@ def screen_run(
     output: str = typer.Option("table", "--output", "-o", help="table | json"),
 ) -> None:
     """Run a screen against the database (or seed fixture) and print results."""
-
     if name not in BUILTIN_SCREENS:
         raise typer.BadParameter(f"Unknown screen {name!r}")
 
@@ -178,7 +172,6 @@ async def _load_universe_or_fixture() -> list[tuple[Instrument, FundamentalsSnap
     empty, falls back to the bundled stub fixture so the app is usable
     out-of-the-box.
     """
-
     try:
         engine = create_engine_from_url(get_settings().database_url)
         factory = get_session_factory(engine)

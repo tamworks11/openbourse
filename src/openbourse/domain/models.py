@@ -86,6 +86,7 @@ class ScreenResult:
 
     @property
     def filtered_count(self) -> int:
+        """Number of instruments that survived the screen's filter."""
         return len(self.candidates)
 
 

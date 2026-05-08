@@ -47,11 +47,9 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Return a cached :class:`Settings` instance."""
-
     return Settings()
 
 
 def reset_settings_cache() -> None:
     """Clear the cached settings — useful in tests that mutate the environment."""
-
     get_settings.cache_clear()

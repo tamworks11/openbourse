@@ -34,9 +34,11 @@ class BourseApp(App[None]):
         self._universe = universe
 
     def on_mount(self) -> None:
+        """Push the screener as the initial screen."""
         self.push_screen(ScreenerScreen(providers=self.providers, universe=self._universe))
 
     def action_help(self) -> None:
+        """Surface a one-line keybinding cheat sheet via Textual's notify popup."""
         self.notify(
             "Keys: ↑↓ navigate · enter view brief · f filter · s sort · "
             "e export · w watchlist · q quit",

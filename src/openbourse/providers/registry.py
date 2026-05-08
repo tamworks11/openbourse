@@ -17,7 +17,6 @@ def build_providers(settings: Settings | None = None) -> Providers:
     the corresponding credential and will raise :class:`ValueError` if it is
     missing.
     """
-
     settings = settings or get_settings()
 
     if settings.use_stubs:

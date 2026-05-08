@@ -38,6 +38,7 @@ class FmpFundamentalsProvider:
         self._owns_client = client is None
 
     async def fetch(self, ticker: str) -> FundamentalsSnapshot:
+        """Fetch profile + TTM key metrics from FMP and merge into one snapshot."""
         import asyncio
 
         ticker = ticker.upper()
@@ -48,10 +49,12 @@ class FmpFundamentalsProvider:
         return _parse_fundamentals(ticker, profile, key_metrics)
 
     async def aclose(self) -> None:
+        """Close the underlying HTTP client if this provider owns it."""
         if self._owns_client:
             await self._client.aclose()
 
     async def _get(self, path: str) -> Any:
+        """Issue an authenticated GET against the FMP base URL."""
         params = {"apikey": self._api_key}
         response = await self._client.get(f"{self._base_url}{path}", params=params)
         response.raise_for_status()
@@ -85,6 +88,7 @@ class StubFundamentalsProvider:
         self._fixture = fixture or _load_default_fixture()
 
     async def fetch(self, ticker: str) -> FundamentalsSnapshot:
+        """Return the fixture snapshot for ``ticker`` or raise :class:`KeyError`."""
         ticker = ticker.upper()
         try:
             return self._fixture[ticker]
@@ -93,6 +97,7 @@ class StubFundamentalsProvider:
 
     @property
     def tickers(self) -> tuple[str, ...]:
+        """Tuple of every ticker known to this stub, sorted alphabetically."""
         return tuple(sorted(self._fixture))
 
 

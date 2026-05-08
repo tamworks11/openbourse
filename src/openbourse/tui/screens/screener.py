@@ -78,6 +78,7 @@ class ScreenerScreen(Screen[None]):
         self._result: ScreenResult | None = None
 
     def compose(self) -> ComposeResult:
+        """Build the layout: status bar, screen metadata, results table, footer."""
         yield StatusBar(self._providers, screen_path=self._screen.name)
         yield Vertical(
             Static(self._screen_description(), id="screen-meta"),
@@ -88,11 +89,13 @@ class ScreenerScreen(Screen[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        """Wire columns onto the table and run the screen for the first time."""
         table = self.query_one("#candidates", DataTable)
         table.add_columns(*COLUMNS)
         self.refresh_results()
 
     def refresh_results(self) -> None:
+        """Re-run the active screen and repaint stats + table."""
         self._result = self._service.run(self._screen, self._universe)
         self._render_stats(self._result)
         self._render_table(self._result)
@@ -131,6 +134,7 @@ class ScreenerScreen(Screen[None]):
         )
 
     def action_view_brief(self) -> None:
+        """Open the brief screen for the row currently under the cursor."""
         if self._result is None or not self._result.candidates:
             return
         table = self.query_one("#candidates", DataTable)
@@ -143,13 +147,17 @@ class ScreenerScreen(Screen[None]):
         self.app.push_screen(BriefScreen(candidate=candidate, providers=self._providers))
 
     def action_filter(self) -> None:
+        """Open the interactive filter editor (not yet implemented — placeholder notice)."""
         self.app.notify("Filter editor coming soon.", timeout=2)
 
     def action_sort(self) -> None:
+        """Open the custom sort UI (not yet implemented — placeholder notice)."""
         self.app.notify("Custom sort coming soon — currently sorted by score desc.", timeout=2)
 
     def action_export(self) -> None:
+        """Export the current candidates to CSV (not yet implemented — placeholder notice)."""
         self.app.notify("CSV export coming soon.", timeout=2)
 
     def action_watchlist(self) -> None:
+        """Toggle the focused candidate on the watchlist (not yet implemented)."""
         self.app.notify("Watchlist actions coming soon.", timeout=2)
