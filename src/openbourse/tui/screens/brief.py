@@ -1,4 +1,4 @@
-"""Per-instrument brief screen — fundamentals + AI-authored summary."""
+"""Per-instrument brief screen — fundamentals header, history charts, AI brief."""
 
 from __future__ import annotations
 
@@ -10,31 +10,41 @@ from textual.containers import VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Footer, LoadingIndicator, Static
 
-from openbourse.domain import AiBrief, Candidate
+from openbourse.domain import AiBrief, Candidate, FundamentalsSnapshot
 from openbourse.providers import Providers
+from openbourse.tui.widgets import HistoryCharts
 
 
 class BriefScreen(Screen[None]):
-    """Per-instrument detail screen — fundamentals header + AI-authored brief."""
+    """Per-instrument detail: fundamentals header, history charts, AI brief."""
 
     BINDINGS: ClassVar[list[BindingType]] = [
         ("escape", "app.pop_screen", "Back"),
         ("b", "app.pop_screen", "Back"),
     ]
 
-    def __init__(self, *, candidate: Candidate, providers: Providers) -> None:
+    def __init__(
+        self,
+        *,
+        candidate: Candidate,
+        providers: Providers,
+        history: list[FundamentalsSnapshot] | None = None,
+    ) -> None:
         super().__init__()
         self._candidate = candidate
         self._providers = providers
+        self._history = history or []
 
     def compose(self) -> ComposeResult:
-        """Render a full-width header, a loading indicator, and the brief body."""
+        """Render a full-width header, history charts, and the AI brief body."""
         c = self._candidate
         snap = c.snapshot
+        price_str = f"${snap.price_usd:,.2f}" if snap.price_usd is not None else "—"
         header = (
             f"[b cyan]{c.instrument.ticker}[/b cyan]  {c.instrument.name}  "
             f"[dim]{c.instrument.sector or ''}  ·  "
             f"{c.instrument.exchange or ''}[/dim]\n"
+            f"Price [b]{price_str}[/b]  ·  "
             f"Mkt cap [b]${snap.market_cap_usd / 1e9:.1f}B[/b]  ·  "
             f"Rev growth [b]{snap.revenue_growth_pct:+.1f}%[/b]  ·  "
             f"GM [b]{snap.gross_margin_pct:.1f}%[/b]  ·  "
@@ -43,6 +53,9 @@ class BriefScreen(Screen[None]):
             f"Score [b]{c.score}[/b]    Verdict [b]{c.verdict.value}[/b]"
         )
         yield Static(header, id="brief-header")
+        # Always include the charts widget — it self-handles "insufficient
+        # history" so even ad-hoc lookups with no history render gracefully.
+        yield HistoryCharts(self._history)
         yield LoadingIndicator(id="brief-loading")
         yield VerticalScroll(Static("", id="brief-body"), id="brief-scroll")
         yield Footer()
@@ -52,6 +65,7 @@ class BriefScreen(Screen[None]):
         self.run_worker(self._load_brief(), exclusive=True)
 
     async def _load_brief(self) -> None:
+        """Fetch recent filings (best-effort) and the AI brief, then render."""
         from openbourse.providers.base import Filing
 
         c = self._candidate
@@ -65,6 +79,7 @@ class BriefScreen(Screen[None]):
         self._render_brief(brief)
 
     def _render_brief(self, brief: AiBrief) -> None:
+        """Hide the loading indicator and write the brief body in place."""
         self.query_one("#brief-loading", LoadingIndicator).display = False
         body = self.query_one("#brief-body", Static)
         bullets = "\n".join(f"  • {b}" for b in brief.bullets)

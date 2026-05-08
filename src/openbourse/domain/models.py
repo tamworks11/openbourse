@@ -39,6 +39,10 @@ class FundamentalsSnapshot:
 
     All ratios are expressed as percentages (e.g. ``18.4`` means 18.4%) unless
     explicitly noted. Currency amounts are in USD.
+
+    ``price_usd`` is the close price as of ``as_of`` when the underlying
+    provider exposes one. It is optional because not every data source
+    returns a price for historical fundamentals snapshots.
     """
 
     ticker: str
@@ -48,6 +52,7 @@ class FundamentalsSnapshot:
     gross_margin_pct: float
     net_debt_to_ebitda: float
     fcf_yield_pct: float
+    price_usd: float | None = None
     revenue_ttm_usd: float | None = None
     ebitda_ttm_usd: float | None = None
 

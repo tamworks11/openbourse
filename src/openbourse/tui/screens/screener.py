@@ -50,7 +50,18 @@ VERDICT_STYLES: dict[Verdict, str] = {
     Verdict.REJECT: "dim red",
 }
 
-COLUMNS = ("#", "TICKER", "NAME", "MKT CAP", "REV GR", "GM", "FCF YLD", "SCORE", "VERDICT")
+COLUMNS = (
+    "#",
+    "TICKER",
+    "NAME",
+    "PRICE",
+    "MKT CAP",
+    "REV GR",
+    "GM",
+    "FCF YLD",
+    "SCORE",
+    "VERDICT",
+)
 
 
 def _format_market_cap(cap_usd: float) -> str:
@@ -74,6 +85,13 @@ def _format_pct(value: float) -> str:
     return f"{value:.1f}%"
 
 
+def _format_price(price: float | None) -> str:
+    """Stock price with two decimals; em-dash when missing."""
+    if price is None:
+        return "—"
+    return f"${price:,.2f}"
+
+
 class ScreenerScreen(Screen[None]):
     """Renders the screen definition, summary stats, candidate table, and detail pane."""
 
@@ -93,11 +111,13 @@ class ScreenerScreen(Screen[None]):
         providers: Providers,
         screen_name: str = "quality_compounders",
         universe: Iterable[tuple[Instrument, FundamentalsSnapshot]] | None = None,
+        history: dict[str, list[FundamentalsSnapshot]] | None = None,
     ) -> None:
         super().__init__()
         self._providers = providers
         self._screen: ScreenDefinition = BUILTIN_SCREENS[screen_name]
         self._universe = list(universe) if universe is not None else []
+        self._history = history or {}
         self._service = ScreeningService()
         self._result: ScreenResult | None = None
 
@@ -165,6 +185,7 @@ class ScreenerScreen(Screen[None]):
             f"{index:02d}",
             candidate.instrument.ticker,
             candidate.instrument.name,
+            _format_price(snap.price_usd),
             _format_market_cap(snap.market_cap_usd),
             _format_signed_pct(snap.revenue_growth_pct),
             _format_pct(snap.gross_margin_pct),
@@ -188,6 +209,7 @@ class ScreenerScreen(Screen[None]):
             f"[b cyan]{c.instrument.ticker}[/b cyan]  {c.instrument.name}\n"
             f"[dim]{c.instrument.sector or '—'}  ·  {c.instrument.exchange or '—'}[/dim]\n"
             f"\n"
+            f"Price           {_format_price(snap.price_usd):>12}\n"
             f"Mkt cap         {_format_market_cap(snap.market_cap_usd):>12}\n"
             f"Rev growth      {_format_signed_pct(snap.revenue_growth_pct):>12}\n"
             f"Gross margin    {_format_pct(snap.gross_margin_pct):>12}\n"
@@ -204,6 +226,16 @@ class ScreenerScreen(Screen[None]):
         """Update the detail pane whenever the cursor moves to a new row."""
         if event.cursor_row is not None:
             self._render_detail(event.cursor_row)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Push the brief screen when the user hits Enter on a table row.
+
+        Textual's DataTable consumes Enter and emits ``RowSelected``; the
+        screen's own ``enter`` binding never fires while the table has focus,
+        so we handle this event explicitly.
+        """
+        if event.cursor_row is not None:
+            self._open_brief_for_row(event.cursor_row)
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         """Parse and dispatch the command typed into the bottom input."""
@@ -225,16 +257,26 @@ class ScreenerScreen(Screen[None]):
 
     def action_view_brief(self) -> None:
         """Open the brief screen for the row currently under the cursor."""
+        table = self.query_one("#candidates", DataTable)
+        if table.cursor_row is not None:
+            self._open_brief_for_row(table.cursor_row)
+
+    def _open_brief_for_row(self, row: int) -> None:
+        """Push the brief screen for ``row`` in the current result set."""
         if self._result is None or not self._result.candidates:
             return
-        table = self.query_one("#candidates", DataTable)
-        row = table.cursor_row
-        if row is None or row >= len(self._result.candidates):
+        if row < 0 or row >= len(self._result.candidates):
             return
         from openbourse.tui.screens.brief import BriefScreen
 
         candidate = self._result.candidates[row]
-        self.app.push_screen(BriefScreen(candidate=candidate, providers=self._providers))
+        self.app.push_screen(
+            BriefScreen(
+                candidate=candidate,
+                providers=self._providers,
+                history=self._history.get(candidate.instrument.ticker, []),
+            )
+        )
 
     def action_filter(self) -> None:
         """Open the interactive filter editor (not yet implemented — placeholder notice)."""
@@ -305,13 +347,34 @@ class ScreenerScreen(Screen[None]):
         self.app.notify(f"unknown command: {raw}", severity="warning", timeout=3)
 
     async def _open_brief_for_ticker(self, ticker: str) -> None:
-        """Resolve ``ticker`` via the lookup pipeline, then push the brief screen."""
-        from openbourse.screening import TickerLookupError, lookup_candidate
+        """Resolve ``ticker`` and fetch its history, then push the brief screen.
+
+        Tries the in-memory history dict first (populated at app startup from
+        the DB or seed). If that's empty for this ticker — typical for an
+        ad-hoc lookup of an off-fixture ticker — falls through to the live
+        provider history call so charts still render.
+        """
+        from openbourse.screening import (
+            TickerLookupError,
+            lookup_candidate,
+            lookup_with_history,
+        )
         from openbourse.tui.screens.brief import BriefScreen
 
+        cached_history = self._history.get(ticker.upper(), [])
         try:
-            candidate = await lookup_candidate(ticker, self._providers)
+            if cached_history:
+                candidate = await lookup_candidate(ticker, self._providers)
+                history = cached_history
+            else:
+                candidate, history = await lookup_with_history(ticker, self._providers)
         except TickerLookupError as exc:
             self.app.notify(str(exc), title="Lookup failed", severity="error", timeout=4)
             return
-        self.app.push_screen(BriefScreen(candidate=candidate, providers=self._providers))
+        self.app.push_screen(
+            BriefScreen(
+                candidate=candidate,
+                providers=self._providers,
+                history=history,
+            )
+        )

@@ -30,6 +30,7 @@ def _to_snapshot(row: FundamentalsRow, ticker: str) -> FundamentalsSnapshot:
         gross_margin_pct=row.gross_margin_pct,
         net_debt_to_ebitda=row.net_debt_to_ebitda,
         fcf_yield_pct=row.fcf_yield_pct,
+        price_usd=row.price_usd,
         revenue_ttm_usd=row.revenue_ttm_usd,
         ebitda_ttm_usd=row.ebitda_ttm_usd,
     )
@@ -106,6 +107,7 @@ class FundamentalsRepository:
             "gross_margin_pct": snapshot.gross_margin_pct,
             "net_debt_to_ebitda": snapshot.net_debt_to_ebitda,
             "fcf_yield_pct": snapshot.fcf_yield_pct,
+            "price_usd": snapshot.price_usd,
             "revenue_ttm_usd": snapshot.revenue_ttm_usd,
             "ebitda_ttm_usd": snapshot.ebitda_ttm_usd,
         }
@@ -140,6 +142,40 @@ class FundamentalsRepository:
                 continue
             seen.add(inst_row.ticker)
             out.append((_to_instrument(inst_row), _to_snapshot(fund_row, inst_row.ticker)))
+        return out
+
+    async def history_for_ticker(
+        self, ticker: str, *, limit: int | None = None
+    ) -> list[FundamentalsSnapshot]:
+        """Return all snapshots for ``ticker`` ordered by ``as_of`` ascending.
+
+        Use the ascending order so the caller can feed the list directly into
+        a time-series chart. Pass ``limit`` to cap the number of points
+        returned (the *most recent* ``limit`` are kept).
+        """
+        ticker = ticker.upper()
+        stmt = (
+            select(InstrumentRow, FundamentalsRow)
+            .join(FundamentalsRow, FundamentalsRow.instrument_id == InstrumentRow.id)
+            .where(InstrumentRow.ticker == ticker)
+            .order_by(FundamentalsRow.as_of.asc())
+        )
+        rows = (await self.session.execute(stmt)).all()
+        snapshots = [_to_snapshot(fund, inst.ticker) for inst, fund in rows]
+        if limit is not None and len(snapshots) > limit:
+            snapshots = snapshots[-limit:]
+        return snapshots
+
+    async def history_for_all(self) -> dict[str, list[FundamentalsSnapshot]]:
+        """Return a ``{ticker: [snapshots ascending by date]}`` map for every instrument."""
+        stmt = (
+            select(InstrumentRow, FundamentalsRow)
+            .join(FundamentalsRow, FundamentalsRow.instrument_id == InstrumentRow.id)
+            .order_by(InstrumentRow.ticker, FundamentalsRow.as_of.asc())
+        )
+        out: dict[str, list[FundamentalsSnapshot]] = {}
+        for inst_row, fund_row in (await self.session.execute(stmt)).all():
+            out.setdefault(inst_row.ticker, []).append(_to_snapshot(fund_row, inst_row.ticker))
         return out
 
 

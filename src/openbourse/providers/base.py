@@ -39,6 +39,15 @@ class FundamentalsProvider(Protocol):
         """Return the most recent :class:`FundamentalsSnapshot` for ``ticker``."""
         ...
 
+    async def history(self, ticker: str, *, limit: int = 8) -> list[FundamentalsSnapshot]:
+        """Return up to ``limit`` historical snapshots for ``ticker``.
+
+        Snapshots are returned ascending by ``as_of`` so callers can feed
+        them straight into a chart. Implementations should silently return
+        an empty list when no history is available rather than raising.
+        """
+        ...
+
 
 @runtime_checkable
 class FilingsProvider(Protocol):
@@ -65,9 +74,35 @@ class BriefProvider(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class Providers:
-    """Bundle of every provider the application needs."""
+    """Bundle of every provider the application needs.
+
+    The three ``*_mode`` fields are either ``"live"`` or ``"stub"`` per
+    provider. They power the status-bar indicators and let the registry
+    mix-and-match so a missing Claude key doesn't disable a working FMP
+    setup.
+    """
 
     fundamentals: FundamentalsProvider
     filings: FilingsProvider
     brief: BriefProvider
-    using_stubs: bool = field(default=False)
+    fundamentals_mode: str = field(default="stub")
+    filings_mode: str = field(default="stub")
+    brief_mode: str = field(default="stub")
+
+    @property
+    def using_stubs(self) -> bool:
+        """True iff every provider is a stub. Kept for backwards compatibility."""
+        return (
+            self.fundamentals_mode == "stub"
+            and self.filings_mode == "stub"
+            and self.brief_mode == "stub"
+        )
+
+    @property
+    def all_live(self) -> bool:
+        """True iff every provider is live."""
+        return (
+            self.fundamentals_mode == "live"
+            and self.filings_mode == "live"
+            and self.brief_mode == "live"
+        )

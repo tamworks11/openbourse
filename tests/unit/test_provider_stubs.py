@@ -33,6 +33,22 @@ class TestStubFundamentalsProvider:
         assert "CDNS" in provider.tickers
         assert "VEEV" in provider.tickers
 
+    async def test_history_returns_quarterly_series(self) -> None:
+        provider = StubFundamentalsProvider()
+        history = await provider.history("CDNS", limit=8)
+        assert len(history) >= 1
+        # Ascending by date.
+        assert all(history[i].as_of <= history[i + 1].as_of for i in range(len(history) - 1))
+
+    async def test_history_respects_limit(self) -> None:
+        provider = StubFundamentalsProvider()
+        capped = await provider.history("CDNS", limit=3)
+        assert len(capped) <= 3
+
+    async def test_history_for_unknown_ticker_is_empty(self) -> None:
+        provider = StubFundamentalsProvider()
+        assert await provider.history("ZZZZ") == []
+
 
 class TestStubFilingsProvider:
     async def test_returns_filings_for_known_cik(self) -> None:

@@ -28,14 +28,22 @@ class BourseApp(App[None]):
         *,
         providers: Providers | None = None,
         universe: list[tuple[Any, Any]] | None = None,
+        history: dict[str, list[Any]] | None = None,
     ) -> None:
         super().__init__()
         self.providers = providers or build_providers()
         self._universe = universe
+        self._history = history or {}
 
     def on_mount(self) -> None:
         """Push the screener as the initial screen."""
-        self.push_screen(ScreenerScreen(providers=self.providers, universe=self._universe))
+        self.push_screen(
+            ScreenerScreen(
+                providers=self.providers,
+                universe=self._universe,
+                history=self._history,
+            )
+        )
 
     def action_help(self) -> None:
         """Surface a one-line keybinding cheat sheet via Textual's notify popup."""

@@ -51,8 +51,11 @@ class StatusBar(Horizontal):
         self._refresh_text()
 
     def _provider_marker(self) -> str:
-        kind = "stub" if self._providers.using_stubs else "live"
-        return f"● FMP {kind}  ● EDGAR {kind}  ● Claude {kind}"
+        return (
+            f"● FMP {self._providers.fundamentals_mode}  "
+            f"● EDGAR {self._providers.filings_mode}  "
+            f"● Claude {self._providers.brief_mode}"
+        )
 
     def _refresh_text(self) -> None:
         timestamp = self.now.strftime("%Y-%m-%d %H:%M:%S")

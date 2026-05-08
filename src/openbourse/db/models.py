@@ -71,6 +71,7 @@ class FundamentalsRow(Base):
     gross_margin_pct: Mapped[float] = mapped_column(Float, nullable=False)
     net_debt_to_ebitda: Mapped[float] = mapped_column(Float, nullable=False)
     fcf_yield_pct: Mapped[float] = mapped_column(Float, nullable=False)
+    price_usd: Mapped[float | None] = mapped_column(Float)
     revenue_ttm_usd: Mapped[float | None] = mapped_column(Float)
     ebitda_ttm_usd: Mapped[float | None] = mapped_column(Float)
 
