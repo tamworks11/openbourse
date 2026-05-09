@@ -75,14 +75,16 @@ class TestStubFilingsProvider:
 
 
 class TestStubBriefProvider:
-    async def test_brief_has_summary_and_bullets(
+    async def test_brief_has_three_sections(
         self, sample_instrument: Instrument, sample_snapshot: FundamentalsSnapshot
     ) -> None:
         provider = StubBriefProvider()
         brief = await provider.write_brief(sample_instrument, sample_snapshot)
         assert brief.ticker == sample_instrument.ticker
         assert brief.summary
-        assert len(brief.bullets) >= 1
+        assert len(brief.bull) >= 1
+        assert len(brief.bear) >= 1
+        assert len(brief.risks) >= 1
         assert brief.model.startswith("stub-")
 
     async def test_brief_includes_filing_when_provided(
@@ -103,4 +105,23 @@ class TestStubBriefProvider:
             )
         ]
         brief = await StubBriefProvider().write_brief(sample_instrument, sample_snapshot, filings)
-        assert any("10-K" in b for b in brief.bullets)
+        # Filing context lands in the risks section (last entry, by design).
+        assert any("10-K" in r for r in brief.risks)
+
+    async def test_brief_returns_concern_finding_per_request(
+        self, sample_instrument: Instrument, sample_snapshot: FundamentalsSnapshot
+    ) -> None:
+        custom = ["High SBC", "Customer concentration"]
+        brief = await StubBriefProvider().write_brief(
+            sample_instrument, sample_snapshot, concerns=custom
+        )
+        assert [f.concern for f in brief.concerns] == custom
+        assert all(f.status == "unknown" for f in brief.concerns)
+
+    async def test_brief_uses_default_concerns_when_omitted(
+        self, sample_instrument: Instrument, sample_snapshot: FundamentalsSnapshot
+    ) -> None:
+        from openbourse.screening.concerns import DEFAULT_CONCERNS
+
+        brief = await StubBriefProvider().write_brief(sample_instrument, sample_snapshot)
+        assert tuple(f.concern for f in brief.concerns) == DEFAULT_CONCERNS

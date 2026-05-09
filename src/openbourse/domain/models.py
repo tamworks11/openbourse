@@ -109,12 +109,37 @@ class ScreenResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ConcernFinding:
+    """One row of "user-defined concern checked against this candidate".
+
+    ``status`` is one of:
+
+    * ``"flagged"`` — there's evidence the concern applies.
+    * ``"clear"``   — there's evidence it doesn't apply.
+    * ``"unknown"`` — no evidence either way (default for new concerns).
+    """
+
+    concern: str
+    status: str
+    note: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class AiBrief:
-    """An AI-generated qualitative brief for an instrument."""
+    """An AI-generated qualitative brief for an instrument.
+
+    The shape is deliberately opinionated: a one-line summary, then three
+    parallel sections (bull / bear / risks) so the LLM can't fudge the
+    bear case by burying it in the summary, plus a list of concern-level
+    findings the user has explicitly asked about.
+    """
 
     ticker: str
     generated_at: datetime
     model: str
     summary: str
-    bullets: tuple[str, ...] = field(default_factory=tuple)
+    bull: tuple[str, ...] = field(default_factory=tuple)
+    bear: tuple[str, ...] = field(default_factory=tuple)
+    risks: tuple[str, ...] = field(default_factory=tuple)
+    concerns: tuple[ConcernFinding, ...] = field(default_factory=tuple)
     raw: dict[str, Any] = field(default_factory=dict)

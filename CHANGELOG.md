@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Structured AI brief** — replaces the single-paragraph summary with three
+  parallel sections (Bull case, Bear case, Risks to monitor) plus a
+  user-defined Concerns checklist. Forces the model to make the bear case
+  visible instead of burying it.
+- **Style-fit score** — per-screen 0-100 score showing how closely a
+  candidate's metrics match the active screen's enabled criteria. Surfaced
+  alongside the composite score on the screener detail pane and brief
+  header. Distinct from the composite score, which is style-agnostic.
+- **Concern findings** — every brief evaluates a default list of concerns
+  (customer concentration, SBC weight, insider selling, accounting
+  aggressiveness, …) and renders a per-concern flagged/clear/unknown
+  status. The list can be overridden per `write_brief` call; an editor UI
+  is on the roadmap.
+
+### Changed
+
+- `AiBrief` no longer carries a single `bullets` field; consumers should
+  use `bull` / `bear` / `risks` / `concerns` instead. CLI `--output json`
+  output for `bourse lookup --brief` mirrors the new shape.
+
 ## [0.1.0] - 2026-05-08
 
 ### Added

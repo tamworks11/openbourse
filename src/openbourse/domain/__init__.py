@@ -7,6 +7,7 @@ the database layer, and the TUI all speak to each other through them.
 from openbourse.domain.models import (
     AiBrief,
     Candidate,
+    ConcernFinding,
     FundamentalsSnapshot,
     Instrument,
     ScreenDefinition,
@@ -17,6 +18,7 @@ from openbourse.domain.models import (
 __all__ = [
     "AiBrief",
     "Candidate",
+    "ConcernFinding",
     "FundamentalsSnapshot",
     "Instrument",
     "ScreenDefinition",

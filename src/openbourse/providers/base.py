@@ -89,8 +89,16 @@ class BriefProvider(Protocol):
         instrument: Instrument,
         snapshot: FundamentalsSnapshot,
         filings: list[Filing] | None = None,
+        concerns: list[str] | None = None,
     ) -> AiBrief:
-        """Return an :class:`AiBrief` summarising the instrument and its filings."""
+        """Return an :class:`AiBrief` with bull / bear / risks / concerns sections.
+
+        ``concerns`` is the user-supplied list of issues to evaluate
+        (e.g. "Customer concentration"). Implementations should produce a
+        :class:`~openbourse.domain.ConcernFinding` per supplied concern,
+        even if the status is ``"unknown"``. Falls back to a sensible
+        default list when ``None`` is passed.
+        """
         ...
 
 

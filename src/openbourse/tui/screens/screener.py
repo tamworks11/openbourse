@@ -40,7 +40,12 @@ from openbourse.domain import (
     Verdict,
 )
 from openbourse.providers import Providers
-from openbourse.screening import BUILTIN_SCREENS, ScreeningService, format_active_filters
+from openbourse.screening import (
+    BUILTIN_SCREENS,
+    ScreeningService,
+    compute_style_fit,
+    format_active_filters,
+)
 from openbourse.tui.widgets import StatusBar
 
 VERDICT_STYLES: dict[Verdict, str] = {
@@ -245,6 +250,7 @@ class ScreenerScreen(Screen[None]):
         verdict_style = VERDICT_STYLES[c.verdict]
         # Position indicator — useful when the candidate list is thousands long.
         position = f"[dim]{row_index + 1:,}/{len(self._result.candidates):,}[/dim]  "
+        fit_pct = compute_style_fit(snap, self._screen)
         body.update(
             f"{position}[b cyan]{c.instrument.ticker}[/b cyan]  {c.instrument.name}\n"
             f"[dim]{c.instrument.sector or '—'}  ·  {c.instrument.exchange or '—'}[/dim]\n"
@@ -256,7 +262,7 @@ class ScreenerScreen(Screen[None]):
             f"Net debt/EBITDA {snap.net_debt_to_ebitda:>11.2f}x\n"
             f"FCF yield       {_format_pct(snap.fcf_yield_pct):>12}\n"
             f"\n"
-            f"Score [b]{c.score:>3}[/b]   "
+            f"Score [b]{c.score:>3}[/b]   Fit [b]{fit_pct:>3.0f}%[/b]   "
             f"Verdict [{verdict_style}]{c.verdict.value}[/{verdict_style}]"
         )
         if c.instrument.business_summary:
@@ -362,6 +368,7 @@ class ScreenerScreen(Screen[None]):
                 candidate=candidate,
                 providers=self._providers,
                 history=self._history.get(candidate.instrument.ticker, []),
+                screen=self._screen,
             )
         )
 
@@ -565,5 +572,6 @@ class ScreenerScreen(Screen[None]):
                 candidate=candidate,
                 providers=self._providers,
                 history=history,
+                screen=self._screen,
             )
         )
