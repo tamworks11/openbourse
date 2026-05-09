@@ -104,6 +104,31 @@ class FmpFundamentalsProvider:
 
         return _parse_current_fundamentals(ticker, profile, km_ttm, rt_ttm, income)
 
+    async def price_history(
+        self, ticker: str, *, period: str = "3y", interval: str = "1d"
+    ) -> list[tuple[date, float]]:
+        """Pull EOD prices via ``/historical-price-eod/full``.
+
+        Translates yfinance-style ``period`` (``3y``) into the ``from``/``to``
+        date pair FMP expects. Returns an empty list on plan-tier 402s
+        rather than raising — keeps the brief screen rendering even when
+        prices aren't available.
+        """
+        from datetime import timedelta
+
+        ticker = ticker.upper()
+        days = _period_to_days(period)
+        end = date.today()
+        start = end - timedelta(days=days)
+        payload = await self._safe_get(
+            "/historical-price-eod/full",
+            symbol=ticker,
+            **{"from": start.isoformat(), "to": end.isoformat()},
+        )
+        if not isinstance(payload, list):
+            return []
+        return _parse_fmp_prices(payload)
+
     async def metadata(self, ticker: str) -> Instrument:
         """Pull identity metadata + business description from FMP's ``/profile``."""
         ticker = ticker.upper()
@@ -174,6 +199,36 @@ class FmpFundamentalsProvider:
         response = await self._client.get(f"{self._base_url}{path}", params=params)
         response.raise_for_status()
         return response.json()
+
+
+def _period_to_days(period: str) -> int:
+    """Convert a yfinance-style period string (``3y``, ``5y``) to a day count."""
+    period = period.strip().lower()
+    if period.endswith("y"):
+        return int(period[:-1] or "1") * 365
+    if period.endswith("mo"):
+        return int(period[:-2] or "1") * 30
+    if period.endswith("d"):
+        return int(period[:-1] or "1")
+    return 365 * 3  # sensible default for unknown formats
+
+
+def _parse_fmp_prices(payload: Any) -> list[tuple[date, float]]:
+    """Project FMP's price rows into ``(date, close)`` tuples ascending by date."""
+    out: list[tuple[date, float]] = []
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        date_str = row.get("date")
+        close = row.get("close") or row.get("adjClose")
+        if not date_str or close is None:
+            continue
+        try:
+            out.append((date.fromisoformat(str(date_str)[:10]), float(close)))
+        except (TypeError, ValueError):
+            continue
+    out.sort(key=lambda r: r[0])
+    return out
 
 
 # --- Parsers -----------------------------------------------------------------
@@ -390,6 +445,45 @@ class StubFundamentalsProvider:
             return self._metadata_fixture[ticker]
         except KeyError as exc:
             raise KeyError(f"unknown ticker: {ticker}") from exc
+
+    async def price_history(
+        self, ticker: str, *, period: str = "3y", interval: str = "1d"
+    ) -> list[tuple[date, float]]:
+        """Return synthetic prices derived from the seeded snapshot history.
+
+        Real daily data isn't bundled — it would balloon the seed file
+        many-fold. Only the latest snapshot per ticker carries an explicit
+        ``price_usd``, so we back-fill historical prices by multiplying
+        each snapshot's market cap by the latest (price ÷ market cap)
+        ratio. This assumes share count is roughly constant across the
+        seed window, which is fine for the curated stub tickers and gives
+        the chart widget realistic-looking shape for screenshots and
+        offline demos. Real users get real daily data via yfinance/FMP.
+        """
+        snaps = self._history_fixture.get(ticker.upper(), [])
+        if not snaps:
+            return []
+
+        # Anchor the synthetic series on the most recent snapshot that has
+        # both a price and a positive market cap.
+        anchor_price: float | None = None
+        anchor_mcap: float = 0.0
+        for s in reversed(snaps):
+            if s.price_usd is not None and s.market_cap_usd > 0:
+                anchor_price = s.price_usd
+                anchor_mcap = s.market_cap_usd
+                break
+        if anchor_price is None:
+            return [(s.as_of, s.price_usd) for s in snaps if s.price_usd is not None]
+        ratio = anchor_price / anchor_mcap
+
+        out: list[tuple[date, float]] = []
+        for s in snaps:
+            if s.price_usd is not None:
+                out.append((s.as_of, s.price_usd))
+            elif s.market_cap_usd > 0:
+                out.append((s.as_of, s.market_cap_usd * ratio))
+        return out
 
     @property
     def tickers(self) -> tuple[str, ...]:

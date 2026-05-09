@@ -73,6 +73,19 @@ class YfinanceFundamentalsProvider:
             business_summary=info.get("longBusinessSummary") or info.get("description"),
         )
 
+    async def price_history(
+        self, ticker: str, *, period: str = "3y", interval: str = "1d"
+    ) -> list[tuple[date, float]]:
+        """Pull daily (or other-interval) close prices via ``Ticker.history``.
+
+        Free, unmetered (in practice). Yahoo throttles when you bulk-pull
+        thousands of tickers in quick succession — at the brief-screen
+        scale of one ticker per click, we don't notice.
+        """
+        ticker = ticker.upper()
+        rows = await asyncio.to_thread(_get_price_history, ticker, period, interval)
+        return rows
+
     async def history(self, ticker: str, *, limit: int = 4) -> list[FundamentalsSnapshot]:
         """Return up to ``limit`` annual snapshots computed from Yahoo statements.
 
@@ -87,6 +100,27 @@ class YfinanceFundamentalsProvider:
 
 
 # --- Blocking I/O helpers (called via asyncio.to_thread) ---------------------
+
+
+def _get_price_history(ticker: str, period: str, interval: str) -> list[tuple[date, float]]:
+    """Fetch ``Ticker.history`` and project it to ``(date, close)`` tuples."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            df = yf.Ticker(ticker).history(period=period, interval=interval)
+    except Exception:  # yfinance raises a wide variety; treat all as "no data"
+        return []
+    if df is None or df.empty or "Close" not in df.columns:
+        return []
+    out: list[tuple[date, float]] = []
+    for idx, value in df["Close"].items():
+        if pd.isna(value):
+            continue
+        try:
+            out.append((_to_python_date(idx), float(value)))
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def _get_info(ticker: str) -> dict[str, Any] | None:

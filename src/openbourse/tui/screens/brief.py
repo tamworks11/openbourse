@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import ClassVar
 
 from textual.app import ComposeResult
@@ -12,7 +13,7 @@ from textual.widgets import Footer, LoadingIndicator, Static
 
 from openbourse.domain import AiBrief, Candidate, FundamentalsSnapshot
 from openbourse.providers import Providers
-from openbourse.tui.widgets import HistoryCharts
+from openbourse.tui.widgets import HistoryCharts, PriceChart
 
 
 class BriefScreen(Screen[None]):
@@ -64,8 +65,12 @@ class BriefScreen(Screen[None]):
                 + "[/dim italic]"
             )
         yield Static(header, id="brief-header")
-        # Always include the charts widget — it self-handles "insufficient
-        # history" so even ad-hoc lookups with no history render gracefully.
+        # Wide price chart on top — most-requested visual when looking at a
+        # ticker. Starts empty and is repopulated by the worker once
+        # ``providers.fundamentals.price_history`` returns.
+        yield PriceChart(c.instrument.ticker, [], chart_width=140)
+        # 2x2 fundamentals trend grid below the price chart. Self-handles
+        # "insufficient history" so ad-hoc lookups still render.
         yield HistoryCharts(self._history)
         yield LoadingIndicator(id="brief-loading")
         yield VerticalScroll(Static("", id="brief-body"), id="brief-scroll")
@@ -76,18 +81,48 @@ class BriefScreen(Screen[None]):
         self.run_worker(self._load_brief(), exclusive=True)
 
     async def _load_brief(self) -> None:
-        """Fetch recent filings (best-effort) and the AI brief, then render."""
+        """Fetch filings, the AI brief, and 3y price history concurrently.
+
+        Each provider call is independent; running them in ``asyncio.gather``
+        means the brief screen renders as soon as the slowest of the three
+        completes, not after their cumulative wall time.
+        """
+        import asyncio
+
         from openbourse.providers.base import Filing
 
         c = self._candidate
-        filings: list[Filing] = []
-        if c.instrument.cik:
+
+        async def _fetch_filings() -> list[Filing]:
+            if not c.instrument.cik:
+                return []
             try:
-                filings = await self._providers.filings.recent_filings(c.instrument.cik, limit=3)
+                return await self._providers.filings.recent_filings(c.instrument.cik, limit=3)
             except (OSError, ValueError):  # pragma: no cover - provider edge case
-                filings = []
+                return []
+
+        async def _fetch_prices() -> list[tuple[date, float]]:
+            try:
+                return await self._providers.fundamentals.price_history(
+                    c.instrument.ticker, period="3y", interval="1d"
+                )
+            except (OSError, ValueError):  # pragma: no cover - provider edge case
+                return []
+
+        filings, price_points = await asyncio.gather(_fetch_filings(), _fetch_prices())
+        # The brief generator depends on filings, so it runs after them.
         brief = await self._providers.brief.write_brief(c.instrument, c.snapshot, filings)
         self._render_brief(brief)
+        await self._render_price_chart(price_points)
+
+    async def _render_price_chart(self, points: list[tuple[date, float]]) -> None:
+        """Replace the empty placeholder PriceChart with one bound to ``points``."""
+        old = self.query_one(PriceChart)
+        await old.remove()
+        await self.mount(
+            PriceChart(self._candidate.instrument.ticker, points, chart_width=140),
+            after=self.query_one("#brief-header"),
+        )
 
     def _render_brief(self, brief: AiBrief) -> None:
         """Hide the loading indicator and write the brief body in place."""

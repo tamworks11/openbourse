@@ -57,6 +57,19 @@ class FundamentalsProvider(Protocol):
         """
         ...
 
+    async def price_history(
+        self, ticker: str, *, period: str = "3y", interval: str = "1d"
+    ) -> list[tuple[date, float]]:
+        """Return ``(date, close_price)`` pairs ascending by date.
+
+        ``period`` follows yfinance's mini-DSL (``1y``, ``3y``, ``5y``,
+        ``max``); ``interval`` is the bar size (``1d``, ``1wk``, ``1mo``).
+        Implementations should return an empty list when no data is
+        available rather than raising — the chart widget renders a clean
+        "insufficient data" placeholder for empty input.
+        """
+        ...
+
 
 @runtime_checkable
 class FilingsProvider(Protocol):
