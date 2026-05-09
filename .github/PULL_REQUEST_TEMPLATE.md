@@ -1,29 +1,73 @@
-<!-- Thanks for contributing! Please fill in the sections below. -->
+<!-- Thanks for contributing to openbourse! Please fill in the sections below. -->
 
-## What this changes
+## Summary
 
-<!-- A short summary. Linking the issue this fixes is gold: "Fixes #123". -->
+<!-- One paragraph: what this PR does and the user-visible result. -->
 
-## Why
+## Motivation
 
-<!-- The motivation. Sometimes the "what" is obvious but the "why" isn't. -->
+<!-- Why this matters. Link the issue this addresses if there is one. -->
+
+Closes #
+
+## Type of change
+
+<!-- Check all that apply. -->
+
+- [ ] Bug fix (non-breaking)
+- [ ] New feature (non-breaking)
+- [ ] Refactor / cleanup (no functional change)
+- [ ] Documentation
+- [ ] Performance
+- [ ] Breaking change (CLI flag, TUI keybind, DB schema, public API)
+- [ ] Other: <!-- describe -->
+
+## What changed
+
+<!-- Bulleted walkthrough so a reviewer can navigate the diff. Mention any
+     non-obvious design choices or trade-offs you considered. -->
+
+-
 
 ## How to verify
 
-<!-- Steps a reviewer can run locally to see the change in action. -->
+<!-- Concrete commands a reviewer can paste to see the change. Include any
+     setup steps if the PR requires a fresh DB or specific .env values. -->
 
 ```bash
-# Example:
 poetry run pytest -m "not integration"
 poetry run bourse run
 ```
 
+## Screenshots / recordings
+
+<!-- For TUI or visual changes, regenerate screenshots and reference them:
+
+       poetry run python scripts/take_screenshots.py
+
+     Then drop the resulting SVGs into the description (drag-drop in GitHub).
+     Before/after pairs are ideal for layout changes. -->
+
+## Risks / things to watch
+
+<!-- What could break? Are there edge cases you didn't cover? Performance
+     concerns at high ticker counts? Breaking changes for existing users? -->
+
 ## Checklist
 
-- [ ] Tests pass locally (`poetry run pytest -m "not integration"`)
-- [ ] Lint + format clean (`poetry run ruff check . && poetry run ruff format --check .`)
-- [ ] Type-check clean (`poetry run mypy src`)
-- [ ] Docs updated if behaviour changed (README, docstrings, `docs/`)
-- [ ] `CHANGELOG.md` updated under `[Unreleased]`
-- [ ] If touching providers, both real and stub variants updated
-- [ ] If adding a DB column, an Alembic migration accompanies it
+- [ ] Tests added or updated to cover the change
+- [ ] `poetry run pytest -m "not integration"` passes locally
+- [ ] `poetry run ruff check . && poetry run ruff format --check .` clean
+- [ ] `poetry run mypy src` clean
+- [ ] Docstrings added or updated for new public functions / classes
+- [ ] `CHANGELOG.md` entry under `[Unreleased]`
+- [ ] If a DB column or table changed: Alembic migration committed
+- [ ] If a provider was added/changed: real **and** stub variants updated
+- [ ] If TUI visuals changed: `docs/screenshots/*.svg` regenerated
+- [ ] Backwards-compatible — or "Breaking change" checked above with a
+      migration note in the PR description
+
+## Notes for the reviewer
+
+<!-- Anything else worth flagging: areas that need scrutiny, open questions,
+     follow-up work that's intentionally out of scope. Optional. -->
