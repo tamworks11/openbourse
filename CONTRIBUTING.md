@@ -17,7 +17,7 @@ practicalities of getting a change merged.
 ```bash
 git clone https://github.com/<your-fork>/openbourse.git
 cd openbourse
-poetry install --with dev
+poetry install --extras dev
 poetry run pre-commit install
 cp .env.example .env
 docker compose up -d postgres

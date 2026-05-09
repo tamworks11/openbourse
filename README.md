@@ -279,7 +279,7 @@ See [docs/architecture.md](docs/architecture.md) for the design walkthrough.
 ## Development
 
 ```bash
-poetry install --with dev
+poetry install --extras dev
 poetry run pre-commit install
 poetry run pytest                 # unit tests, no DB needed
 poetry run pytest -m integration  # requires Postgres from docker compose

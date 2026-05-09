@@ -7,7 +7,7 @@ This guide covers the day-to-day mechanics of working on `openbourse`.
 ```bash
 git clone https://github.com/OpenBourse/openbourse.git
 cd openbourse
-poetry install --with dev
+poetry install --extras dev
 poetry run pre-commit install
 cp .env.example .env
 docker compose up -d postgres
