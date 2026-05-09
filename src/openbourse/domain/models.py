@@ -60,15 +60,26 @@ class FundamentalsSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class ScreenDefinition:
-    """A named, declarative filter over the universe of instruments."""
+    """A named, declarative filter over the universe of instruments.
+
+    Each numeric threshold is optional: ``None`` disables that criterion
+    (the screen ignores it when filtering). This lets a user toggle
+    individual filters on and off in the TUI without inventing sentinel
+    values like ``inf``.
+
+    ``verdicts`` is a separate post-scoring filter: when set, only candidates
+    whose computed verdict is in the given set survive. ``None`` disables
+    the verdict filter entirely (every verdict passes).
+    """
 
     name: str
     description: str
-    min_revenue_growth_pct: float = 0.0
-    min_gross_margin_pct: float = 0.0
-    max_net_debt_to_ebitda: float = float("inf")
-    min_market_cap_usd: float = 0.0
-    min_fcf_yield_pct: float = 0.0
+    min_revenue_growth_pct: float | None = None
+    min_gross_margin_pct: float | None = None
+    max_net_debt_to_ebitda: float | None = None
+    min_market_cap_usd: float | None = None
+    min_fcf_yield_pct: float | None = None
+    verdicts: frozenset[Verdict] | None = None
 
 
 @dataclass(frozen=True, slots=True)

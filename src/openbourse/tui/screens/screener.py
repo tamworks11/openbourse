@@ -40,7 +40,7 @@ from openbourse.domain import (
     Verdict,
 )
 from openbourse.providers import Providers
-from openbourse.screening import BUILTIN_SCREENS, ScreeningService
+from openbourse.screening import BUILTIN_SCREENS, ScreeningService, format_active_filters
 from openbourse.tui.widgets import StatusBar
 
 VERDICT_STYLES: dict[Verdict, str] = {
@@ -193,7 +193,11 @@ class ScreenerScreen(Screen[None]):
     # -- Rendering ---------------------------------------------------------
 
     def _screen_description(self) -> str:
-        return f"[b yellow][SCREEN][/b yellow] {self._screen.description}"
+        # The static ``description`` is the screen's intent; the filter line
+        # below is regenerated from the current thresholds, so edits made via
+        # the f-key modal are reflected on screen immediately.
+        filters = format_active_filters(self._screen)
+        return f"[b yellow][SCREEN][/b yellow] {self._screen.description}\n[dim]{filters}[/dim]"
 
     def _render_stats(self, result: ScreenResult) -> None:
         analyzed = min(result.filtered_count, 12)
@@ -436,8 +440,27 @@ class ScreenerScreen(Screen[None]):
         )
 
     def action_filter(self) -> None:
-        """Open the interactive filter editor (not yet implemented — placeholder notice)."""
-        self.app.notify("Filter editor coming soon.", timeout=2)
+        """Open the filter editor for the active screen.
+
+        On Apply the screener replaces ``self._screen`` with the returned
+        :class:`ScreenDefinition` and re-runs the filter — so flipping a
+        Switch immediately reshapes the candidate list. Cancel returns
+        ``None`` and the in-memory screen is left untouched.
+        """
+        from openbourse.tui.screens.filters import FilterEditorScreen
+
+        self.app.push_screen(
+            FilterEditorScreen(self._screen),
+            self._on_filter_editor_dismissed,
+        )
+
+    def _on_filter_editor_dismissed(self, new_screen: ScreenDefinition | None) -> None:
+        """Apply the returned screen if any; redraw the screener."""
+        if new_screen is None:
+            return
+        self._screen = new_screen
+        self.query_one("#screen-meta-text", Static).update(self._screen_description())
+        self.refresh_results()
 
     def action_sort(self) -> None:
         """Open the custom sort UI (not yet implemented — placeholder notice)."""

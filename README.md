@@ -4,38 +4,56 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 
-A terminal-first equity research workstation. `openbourse` screens public
-companies against quantitative criteria, scores them with a transparent
+A Bloomberg-like terminal equity research workstation. `openbourse` screens
+public companies against quantitative criteria, scores them with a transparent
 composite formula, and surfaces AI-generated briefs — all from a Textual TUI
 backed by PostgreSQL.
 
-> **Status:** early scaffold. Provider integrations (FMP, EDGAR, Anthropic
-> Claude) ship as stubs returning fixture data so contributors can run the
-> full app without API keys.
+> **Status:** early scaffold. The default fundamentals provider is **Yahoo
+> Finance via `yfinance`** — no API key, no quota, ~150,000 tickers. FMP
+> and Anthropic Claude are optional and slot in via env vars when you want
+> them. Stubs are still available for offline development and tests.
 
-```text
-BOURSE v0.1.0                ● FMP stub  ● EDGAR stub  ● Claude stub
-screen://quality_compounders                                  UTC
+## Screens
 
-[SCREEN] Quality Compounders — rev growth ≥15%, gross margin ≥40%,
-         net debt/EBITDA ≤1.0, mkt cap ≥$1B
-Universe: 3,247 US-listed · Filtered: 47 candidates · Analyzed: 12
+The main screener — universe stats, candidates table sorted by composite
+score, and a live detail pane that updates as you move the cursor. The
+right pane shows the focused company's metrics, score, verdict, and a
+short business description from the data provider.
 
- #  TICKER  NAME                    MKT CAP   REV GR   GM    FCF YLD  SCORE  VERDICT
- 01 CDNS    Cadence Design Systems  $78.2B   +18.4%   89.1%  2.8%      94    STRONG_INTEREST
- 02 VEEV    Veeva Systems           $32.8B   +16.1%   74.2%  3.4%      91    STRONG_INTEREST
- ...
+![Screener](docs/screenshots/screener.svg)
 
- ↓ navigate   ↵ view brief   f filter   s sort   e export   w watchlist   ? help
-```
+The brief screen — fundamentals header, 2×2 grid of annual history
+charts, and an AI-generated qualitative summary (stub provider shown
+here; live with an `OPENBOURSE_CLAUDE_API_KEY`).
+
+![Brief screen with charts](docs/screenshots/brief.svg)
+
+Press `f` to open the filter editor. Toggle any criterion on or off,
+tweak its threshold, or restrict the verdict set — apply, and the
+candidates list re-runs in place.
+
+![Filter editor modal](docs/screenshots/filter_editor.svg)
+
+> Screenshots are captured by `scripts/take_screenshots.py` against the
+> bundled stub dataset, so anyone can regenerate them after a UI change.
 
 ## Highlights
 
-- **Textual TUI** — keyboard-driven research over a live PostgreSQL dataset.
-- **Pluggable providers** — `FmpProvider`, `EdgarProvider`, `ClaudeProvider`
-  share a small async interface; swap stubs for real clients via env vars.
+- **Textual TUI** — keyboard-driven research with live history charts,
+  business descriptions, fast-scroll keys, and a `bourse>` command bar.
+- **Free by default** — yfinance for fundamentals, no API key. FMP and
+  Anthropic Claude are optional upgrades via env vars.
+- **Pluggable providers** — `FundamentalsProvider`, `FilingsProvider`, and
+  `BriefProvider` share a small async Protocol; swap implementations
+  without touching call sites.
+- **Editable filters** — toggle each criterion on or off and tweak
+  thresholds from inside the TUI (`f` key). Verdict-level filtering too.
 - **Transparent scoring** — composite score and verdict thresholds are pure
   functions in `openbourse.screening.scoring`, fully unit-tested.
+- **Universe ingest** — `bourse universe ingest --source sp500` (or
+  `russell2000`, `nasdaq100`, etc.) builds your screening universe from
+  Wikipedia + iShares ETF holdings.
 - **SQLAlchemy 2.0 async + Alembic** — typed `Mapped[]` models, versioned
   migrations, repository-pattern data access.
 - **Apache 2.0 licensed** — designed to be forked, vendored, and extended.
@@ -51,7 +69,7 @@ Universe: 3,247 US-listed · Filtered: 47 candidates · Analyzed: 12
 ### Install
 
 ```bash
-git clone https://github.com/your-org/openbourse.git
+git clone https://github.com/OpenBourse/openbourse.git
 cd openbourse
 poetry install
 cp .env.example .env
@@ -59,13 +77,11 @@ cp .env.example .env
 
 ### Database
 
-Start a local Postgres with the bundled compose file, then run migrations and
-load a small seed dataset:
+Start a local Postgres with the bundled compose file and run migrations:
 
 ```bash
 docker compose up -d postgres
 poetry run bourse db migrate
-poetry run bourse db seed
 ```
 
 > The compose service binds Postgres to host port **5433** by default to
@@ -73,29 +89,100 @@ poetry run bourse db seed
 > with `OPENBOURSE_PG_HOST_PORT` in `.env` and update `OPENBOURSE_DATABASE_URL`
 > to match.
 
+### Ingest fundamentals (Yahoo Finance, no API key)
+
+`openbourse` defaults to **yfinance** for fundamentals — completely free,
+unmetered (in practice), and covers ~150,000 tickers. The recommended
+flow for a fresh install:
+
+```bash
+# Try a small ingest first to confirm the pipeline works.
+poetry run bourse universe ingest --source sp500 --limit 10
+
+# Then backfill a real universe. Pick one:
+poetry run bourse universe ingest --source sp500       # 503 names, ~3 min
+poetry run bourse universe ingest --source nasdaq100   # 101 names, ~30 sec
+poetry run bourse universe ingest --source russell2000 # 1,919 names, ~7 min
+poetry run bourse universe ingest --source russell3000 # 2,921 names, ~10 min
+
+# With history (3-4 annual snapshots per ticker, 4× the calls).
+poetry run bourse universe ingest --source sp500 --with-history --rate 0.5
+
+# Refresh after earnings season — only re-fetch rows older than N days.
+poetry run bourse universe ingest --source sp500 --stale-after 30
+```
+
+If you're offline or want to demo the app without network access, the
+bundled fixture dataset still works:
+
+```bash
+poetry run bourse db seed   # loads 10 hand-curated tickers from seed.json
+```
+
+Available sources, including their underlying URLs:
+
+```bash
+poetry run bourse universe sources
+```
+
 ### Launch the TUI
 
 ```bash
 poetry run bourse run
 ```
 
-Press `?` inside the app for keybindings.
+Press `?` inside the app for keybindings. Some highlights:
+
+| Key | Action |
+|---|---|
+| `↑` `↓` | Move 1 row · `g` `G` jump to top/bottom · `[` `]` ±25 · `{` `}` ±100 |
+| `Enter` | Open the brief screen with charts and (optional) AI summary |
+| `f` | Edit filters — toggle any criterion on/off, tweak thresholds |
+| `:` or `/` | Focus the bottom command bar (`:screen all`, `:lookup INTC`, etc.) |
+| `d` | Download annual history for the focused row |
+| `q` | Quit |
+
+### Optional: upgrade to FMP or add Claude briefs
+
+Both are entirely optional. If you have credentials, set them in `.env`:
+
+```bash
+# Use FMP instead of yfinance (paid plans give finer-grained data).
+OPENBOURSE_FUNDAMENTALS_PROVIDER=fmp
+OPENBOURSE_FMP_API_KEY=your-fmp-key
+
+# Generate AI briefs in the brief screen and `bourse lookup --brief`.
+OPENBOURSE_CLAUDE_API_KEY=sk-ant-...
+OPENBOURSE_CLAUDE_MODEL=claude-sonnet-4-6
+
+# SEC EDGAR requires a descriptive User-Agent identifying you.
+OPENBOURSE_EDGAR_USER_AGENT=Your Name your.email@example.com
+```
+
+The status bar at the top of the TUI shows which providers are live vs
+stubbed at any moment.
 
 ## CLI
 
 ```text
-bourse run                  Launch the TUI.
-bourse lookup TICKER        Look up fundamentals for a single ticker.
-bourse lookup TICKER -b     Same, plus an AI-generated brief.
-bourse db migrate           Apply Alembic migrations to the configured DB.
-bourse db seed              Load the bundled fixture dataset.
-bourse screen list          Show available screens (text mode, no TUI).
-bourse screen run NAME      Run a screen and print results as a table or JSON.
-bourse version              Print version and exit.
+bourse run                       Launch the TUI.
+bourse run --screen NAME         Launch with a specific screen
+                                 (all, quality_compounders, deep_value, high_growth).
+bourse lookup TICKER             Look up fundamentals for a single ticker.
+bourse lookup TICKER -b          Same, plus an AI-generated brief.
+bourse lookup TICKER --history   Same, plus annual history (persisted to DB).
+bourse universe ingest -s sp500  Bulk-ingest a list of tickers via yfinance.
+bourse universe sources          List available --source values.
+bourse universe fetch-list NAME  Print a fresh ticker list to stdout.
+bourse db migrate                Apply Alembic migrations to the configured DB.
+bourse db seed                   Load the bundled fixture dataset.
+bourse screen list               Show available screens (text mode, no TUI).
+bourse screen run NAME           Run a screen and print results as a table or JSON.
+bourse version                   Print version and exit.
 ```
 
-Inside the TUI press `/` to open a ticker-lookup prompt — same pipeline,
-just keyboard-driven.
+Inside the TUI press `/` (or `:`) to open the command bar — same pipeline,
+just keyboard-driven (`:lookup INTC`, `:screen all`, `:brief CDNS`, etc.).
 
 All commands respect the `OPENBOURSE_*` environment variables in `.env`.
 

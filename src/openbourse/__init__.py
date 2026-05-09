@@ -1,4 +1,4 @@
-"""openbourse — terminal-first equity research workstation."""
+"""openbourse — Bloomberg-like terminal equity research workstation."""
 
 from importlib.metadata import PackageNotFoundError, version
 

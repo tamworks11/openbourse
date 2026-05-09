@@ -68,3 +68,8 @@ Thumbs.db
 
 # Textual debug
 .textual.log
+
+# AI coding assistants
+.claude/
+.cursorrules
+.aider*

@@ -5,7 +5,7 @@ This guide covers the day-to-day mechanics of working on `openbourse`.
 ## First-time setup
 
 ```bash
-git clone https://github.com/your-org/openbourse.git
+git clone https://github.com/OpenBourse/openbourse.git
 cd openbourse
 poetry install --with dev
 poetry run pre-commit install

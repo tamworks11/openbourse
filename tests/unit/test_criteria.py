@@ -56,3 +56,52 @@ def test_high_growth_screen_requires_25_pct_growth(
 ) -> None:
     # Sample snapshot has 18.4% growth — too low for high growth.
     assert not passes_screen(sample_snapshot, BUILTIN_SCREENS["high_growth"])
+
+
+def test_all_screen_passes_every_snapshot(
+    sample_snapshot: FundamentalsSnapshot,
+    low_quality_snapshot: FundamentalsSnapshot,
+) -> None:
+    """The 'all' screen has every threshold None — nothing is excluded."""
+    assert passes_screen(sample_snapshot, BUILTIN_SCREENS["all"])
+    assert passes_screen(low_quality_snapshot, BUILTIN_SCREENS["all"])
+
+
+def test_format_active_filters_renders_verdict_set() -> None:
+    """The verdict filter shows up in the active-filters string."""
+    from openbourse.domain import Verdict
+    from openbourse.screening.criteria import format_active_filters
+
+    base = BUILTIN_SCREENS["quality_compounders"]
+    line = format_active_filters(base)
+    assert "verdict" not in line  # default has verdicts=None
+
+    with_verdicts = replace(
+        base, verdicts=frozenset({Verdict.STRONG_INTEREST, Verdict.INTERESTING})
+    )
+    line = format_active_filters(with_verdicts)
+    # Order follows declaration order, not set iteration.
+    assert "verdict ∈ {STRONG_INTEREST, INTERESTING}" in line
+
+
+def test_disabling_individual_filters_relaxes_only_that_one(
+    low_quality_snapshot: FundamentalsSnapshot,
+) -> None:
+    """Setting one threshold to None lets a row pass that criterion only."""
+    base = BUILTIN_SCREENS["quality_compounders"]
+    # low_quality_snapshot: rev_growth 3.1, GM 8.5, leverage 6.4, mcap 48B, fcf 4.0
+    assert not passes_screen(low_quality_snapshot, base)
+
+    # Disable just leverage — still fails on rev_growth and GM.
+    no_leverage = replace(base, max_net_debt_to_ebitda=None)
+    assert not passes_screen(low_quality_snapshot, no_leverage)
+
+    # Disable everything except market_cap (which low-quality already passes).
+    almost_all_off = replace(
+        base,
+        min_revenue_growth_pct=None,
+        min_gross_margin_pct=None,
+        max_net_debt_to_ebitda=None,
+        min_fcf_yield_pct=None,
+    )
+    assert passes_screen(low_quality_snapshot, almost_all_off)

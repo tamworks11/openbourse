@@ -1,9 +1,9 @@
 [project]
 name = "openbourse"
 version = "0.1.0"
-description = "Terminal-first equity research workstation. Textual TUI over PostgreSQL with pluggable data providers."
+description = "Bloomberg-like terminal equity research workstation. Textual TUI over PostgreSQL with pluggable data providers."
 authors = [
-    { name = "The openbourse authors" },
+    { email = "tamworks11@gmail.com" },
 ]
 license = "Apache-2.0"
 readme = "README.md"
@@ -57,10 +57,10 @@ dev = [
 bourse = "openbourse.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/your-org/openbourse"
-Repository = "https://github.com/your-org/openbourse"
-Issues = "https://github.com/your-org/openbourse/issues"
-Changelog = "https://github.com/your-org/openbourse/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/OpenBourse/openbourse"
+Repository = "https://github.com/OpenBourse/openbourse"
+Issues = "https://github.com/OpenBourse/openbourse/issues"
+Changelog = "https://github.com/OpenBourse/openbourse/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["poetry-core>=2.0"]

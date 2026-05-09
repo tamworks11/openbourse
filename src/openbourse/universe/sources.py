@@ -28,7 +28,7 @@ import pandas as pd  # type: ignore[import-untyped]
 # Wikipedia and iShares are friendly but ratelimit anonymous bots — a
 # descriptive UA also helps if you hit a 403.
 HTTP_TIMEOUT_SECONDS = 30.0
-HTTP_USER_AGENT = "openbourse/0.1 (https://github.com/your-org/openbourse)"
+HTTP_USER_AGENT = "openbourse/0.1 (https://github.com/OpenBourse/openbourse)"
 
 WIKIPEDIA_SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 WIKIPEDIA_NASDAQ100_URL = "https://en.wikipedia.org/wiki/Nasdaq-100"

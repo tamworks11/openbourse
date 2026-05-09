@@ -34,6 +34,11 @@ class ScreeningService:
     ) -> ScreenResult:
         """Filter ``universe`` by ``screen``, score the survivors, and return them.
 
+        Numeric filters are applied first (cheap, snapshot-only). Surviving
+        rows are then scored, and the verdict filter (if any) is applied
+        last — verdict depends on the score, so it can't be checked until
+        scoring has happened.
+
         Candidates are returned sorted by score descending; ties break on
         ticker ascending so the order is deterministic across runs.
         """
@@ -43,12 +48,15 @@ class ScreeningService:
             if not passes_screen(snapshot, screen):
                 continue
             score = composite_score(snapshot, weights=self._weights)
+            verdict = verdict_for(score)
+            if screen.verdicts is not None and verdict not in screen.verdicts:
+                continue
             candidates.append(
                 Candidate(
                     instrument=instrument,
                     snapshot=snapshot,
                     score=score,
-                    verdict=verdict_for(score),
+                    verdict=verdict,
                 )
             )
         candidates.sort(key=lambda c: (-c.score, c.instrument.ticker))

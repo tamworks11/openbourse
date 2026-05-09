@@ -36,7 +36,7 @@ __all__ = ["app"]
 
 app = typer.Typer(
     name="bourse",
-    help="openbourse — terminal-first equity research workstation.",
+    help="openbourse — Bloomberg-like terminal equity research workstation.",
     add_completion=False,
     no_args_is_help=True,
 )
@@ -413,6 +413,9 @@ def _repo_root() -> Path:
 def _json_default(value: Any) -> Any:
     if isinstance(value, datetime | date):
         return value.isoformat()
+    if isinstance(value, (frozenset, set)):
+        # Sort by enum value (or str fallback) so JSON output is deterministic.
+        return sorted(value, key=lambda v: v.value if hasattr(v, "value") else str(v))
     if hasattr(value, "value"):
         return value.value
     raise TypeError(f"Cannot serialize {type(value).__name__}")
