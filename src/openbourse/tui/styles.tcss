@@ -124,7 +124,9 @@ Screen {
     color: $error;
 }
 
-/* Brief screen — also full-bleed. */
+/* Brief screen — full-bleed two-column layout. Header spans the top, then
+   charts (left) and AI brief body (right) sit side by side so neither has
+   to scroll on a typical 140-col terminal. */
 #brief-header {
     height: auto;
     padding: 0 1;
@@ -132,7 +134,17 @@ Screen {
     border-bottom: solid $accent;
 }
 
-#brief-scroll {
+#brief-main {
+    height: 1fr;
+}
+
+#brief-left {
+    width: 50%;
+    border-right: solid $accent;
+}
+
+#brief-right {
+    width: 50%;
     padding: 1;
 }
 

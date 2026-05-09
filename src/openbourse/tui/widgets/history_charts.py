@@ -79,7 +79,10 @@ class HistoryCharts(Grid):
     }
     """
 
-    CHART_WIDTH: ClassVar[int] = 50
+    # Width per cell in the 2x2 grid. Sized for the brief screen's left
+    # column (~half a 140-col terminal): 35 fits two side-by-side charts
+    # in ~70 columns with a small gutter.
+    CHART_WIDTH: ClassVar[int] = 35
     CHART_HEIGHT: ClassVar[int] = 10
 
     def __init__(self, snapshots: list[FundamentalsSnapshot]) -> None:

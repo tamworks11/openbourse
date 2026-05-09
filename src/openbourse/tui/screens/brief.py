@@ -9,7 +9,7 @@ from typing import ClassVar
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from textual.app import ComposeResult
 from textual.binding import BindingType
-from textual.containers import VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Footer, LoadingIndicator, Static
 
@@ -141,15 +141,22 @@ class BriefScreen(Screen[None]):
                 + "[/dim italic]"
             )
         yield Static(header, id="brief-header")
-        # Wide price chart on top — most-requested visual when looking at a
-        # ticker. Starts empty and is repopulated by the worker once
-        # ``providers.fundamentals.price_history`` returns.
-        yield PriceChart(c.instrument.ticker, [], chart_width=140)
-        # 2x2 fundamentals trend grid below the price chart. Self-handles
-        # "insufficient history" so ad-hoc lookups still render.
-        yield HistoryCharts(self._history)
-        yield LoadingIndicator(id="brief-loading")
-        yield VerticalScroll(Static("", id="brief-body"), id="brief-scroll")
+        # Two-column body: charts on the left, AI brief on the right.
+        # Sized 50/50 so the bull/bear/risks/concerns sections fit on
+        # screen alongside the price chart and 2x2 fundamentals grid
+        # without forcing the user to scroll.
+        with Horizontal(id="brief-main"):
+            with Vertical(id="brief-left"):
+                # Price chart: the right column eats ~half the terminal,
+                # so the chart gets ~half the previous width. The widget
+                # auto-recomputes on render based on its actual size.
+                yield PriceChart(c.instrument.ticker, [], chart_width=70)
+                # 2x2 fundamentals trend grid. Self-handles "insufficient
+                # history" so ad-hoc lookups still render.
+                yield HistoryCharts(self._history)
+            with VerticalScroll(id="brief-right"):
+                yield LoadingIndicator(id="brief-loading")
+                yield Static("", id="brief-body")
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -308,9 +315,12 @@ class BriefScreen(Screen[None]):
         """Replace the empty placeholder PriceChart with one bound to ``points``."""
         old = self.query_one(PriceChart)
         await old.remove()
-        await self.mount(
-            PriceChart(self._candidate.instrument.ticker, points, chart_width=140),
-            after=self.query_one("#brief-header"),
+        # Mount the populated chart at the top of the left column so it
+        # ends up in the same slot the placeholder occupied.
+        left = self.query_one("#brief-left", Vertical)
+        await left.mount(
+            PriceChart(self._candidate.instrument.ticker, points, chart_width=70),
+            before=self.query_one(HistoryCharts),
         )
 
     def _render_brief(self, brief: AiBrief) -> None:
@@ -329,20 +339,15 @@ class BriefScreen(Screen[None]):
         benefit from the rescan.
         """
         ticker = self._candidate.instrument.ticker
-        if not self._filings:
+        reason = self._diagnose_rescan_unavailable()
+        if reason is not None:
             self.app.notify(
-                f"No filings cached for {ticker} — open a brief with EDGAR access first.",
+                reason,
                 title="Rescan unavailable",
                 severity="warning",
-                timeout=4,
-            )
-            return
-        if not any(f.form_type.upper() == "10-K" for f in self._filings):
-            self.app.notify(
-                f"No 10-K available for {ticker}.",
-                title="Rescan unavailable",
-                severity="warning",
-                timeout=4,
+                # Longer timeout because the messages are multi-line and
+                # tell the user how to fix the underlying setup issue.
+                timeout=10,
             )
             return
         self.app.notify(
@@ -355,6 +360,61 @@ class BriefScreen(Screen[None]):
             name="concern_rescan",
             exclusive=False,
         )
+
+    def _diagnose_rescan_unavailable(self) -> str | None:
+        """Return an actionable reason if rescan can't proceed, else None.
+
+        Each branch points at a specific failure mode and the concrete
+        next step the user should take. The toast that surfaces this
+        message is the primary discovery surface for misconfiguration —
+        the alternative is the user pressing ``r`` repeatedly and
+        guessing why nothing happens.
+        """
+        ticker = self._candidate.instrument.ticker
+        cik = self._candidate.instrument.cik
+
+        if self._brief is None:
+            # Brief worker hasn't finished — filings may still be in flight.
+            return f"Brief is still loading for {ticker}. Try again in a moment."
+
+        if not cik:
+            return (
+                f"{ticker} has no CIK on file — EDGAR is keyed by CIK, not ticker.\n"
+                "Fix: re-ingest with a provider that includes CIK (FMP) "
+                "via `OPENBOURSE_FUNDAMENTALS_PROVIDER=fmp bourse lookup "
+                f"{ticker} --history`."
+            )
+
+        if self._providers.filings_mode != "live":
+            return (
+                "EDGAR is in stub mode — no real filings were fetched.\n"
+                "Fix: set `OPENBOURSE_EDGAR_USER_AGENT=\"Your Name "
+                "you@example.com\"` in your .env and restart `bourse run`. "
+                "SEC requires a contact email."
+            )
+
+        if not self._filings:
+            return (
+                f"EDGAR returned no filings for {ticker} (CIK {cik}). "
+                "The CIK may be wrong, or the company hasn't filed recently."
+            )
+
+        if not any(f.form_type.upper() == "10-K" for f in self._filings):
+            forms_seen = ", ".join(sorted({f.form_type for f in self._filings}))
+            return (
+                f"No 10-K in the most-recent filings for {ticker} "
+                f"(saw {forms_seen}). The scanner needs Risk Factors text, "
+                "which only 10-Ks reliably contain."
+            )
+
+        if self._providers.scanner_mode != "live":
+            return (
+                "Scanner is in stub mode — set `OPENBOURSE_CLAUDE_API_KEY` "
+                "in your .env and restart `bourse run`. The stub scanner "
+                "always returns 'unknown' for every concern."
+            )
+
+        return None
 
     async def _rescan_worker(self) -> None:
         """Worker body for :meth:`action_rescan_concerns`.
@@ -428,14 +488,12 @@ class BriefScreen(Screen[None]):
             return
 
         self._history = list(history)
-        # Swap the chart widget in place so the user sees populated charts
-        # without having to back out and re-enter the brief.
+        # Swap the chart widget in place inside the left column so the
+        # user sees populated charts without having to back out.
         old = self.query_one(HistoryCharts)
         await old.remove()
-        await self.mount(
-            HistoryCharts(self._history),
-            after=self.query_one("#brief-header"),
-        )
+        left = self.query_one("#brief-left", Vertical)
+        await left.mount(HistoryCharts(self._history))
         self.app.notify(
             f"Loaded {len(history)} history points for {ticker}.",
             title="Download complete",
