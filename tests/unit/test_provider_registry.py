@@ -9,61 +9,83 @@ from openbourse.providers import build_providers
 from openbourse.providers.claude import ClaudeBriefProvider, StubBriefProvider
 from openbourse.providers.edgar import EdgarFilingsProvider, StubFilingsProvider
 from openbourse.providers.fmp import FmpFundamentalsProvider, StubFundamentalsProvider
+from openbourse.providers.yfinance import YfinanceFundamentalsProvider
 
 
-def test_default_settings_returns_stubs() -> None:
+def test_use_stubs_master_switch_returns_all_stubs() -> None:
     settings = Settings(use_stubs=True)
     providers = build_providers(settings)
     assert providers.using_stubs is True
-    assert providers.fundamentals_mode == "stub"
-    assert providers.filings_mode == "stub"
-    assert providers.brief_mode == "stub"
     assert isinstance(providers.fundamentals, StubFundamentalsProvider)
     assert isinstance(providers.filings, StubFilingsProvider)
     assert isinstance(providers.brief, StubBriefProvider)
 
 
-def test_all_real_when_every_credential_set() -> None:
+def test_default_fundamentals_provider_is_yfinance() -> None:
     settings = Settings(
         use_stubs=False,
+        fundamentals_provider="yfinance",
+        fmp_api_key=None,
+        claude_api_key=None,
+        edgar_user_agent="no-email",
+    )
+    providers = build_providers(settings)
+    assert isinstance(providers.fundamentals, YfinanceFundamentalsProvider)
+    assert providers.fundamentals_mode == "yfinance"
+
+
+def test_fmp_selected_with_key_present() -> None:
+    settings = Settings(
+        use_stubs=False,
+        fundamentals_provider="fmp",
         fmp_api_key=SecretStr("fake-fmp-key"),
         claude_api_key=SecretStr("fake-claude-key"),
         edgar_user_agent="test contact@example.com",
     )
     providers = build_providers(settings)
-    assert providers.all_live is True
     assert isinstance(providers.fundamentals, FmpFundamentalsProvider)
+    assert providers.fundamentals_mode == "fmp"
     assert isinstance(providers.filings, EdgarFilingsProvider)
     assert isinstance(providers.brief, ClaudeBriefProvider)
 
 
-def test_partial_credentials_mix_live_and_stub() -> None:
-    """FMP key set, Claude missing → live FMP, stub Claude. The realistic flow."""
+def test_fmp_selected_without_key_falls_back_to_stub() -> None:
+    """Choosing fmp without supplying a key shouldn't crash — quietly degrade."""
     settings = Settings(
         use_stubs=False,
-        fmp_api_key=SecretStr("fake-fmp-key"),
-        edgar_user_agent="test contact@example.com",
-        # claude_api_key intentionally absent
+        fundamentals_provider="fmp",
+        fmp_api_key=None,
+        claude_api_key=None,
+        edgar_user_agent="no-email",
     )
     providers = build_providers(settings)
-    assert providers.fundamentals_mode == "live"
-    assert providers.filings_mode == "live"
-    assert providers.brief_mode == "stub"
-    assert isinstance(providers.fundamentals, FmpFundamentalsProvider)
-    assert isinstance(providers.brief, StubBriefProvider)
+    assert isinstance(providers.fundamentals, StubFundamentalsProvider)
+    assert providers.fundamentals_mode == "stub"
 
 
-def test_no_credentials_falls_back_to_all_stubs() -> None:
-    # Explicit ``None`` overrides any value Pydantic would otherwise read from
-    # the contributor's ``.env`` file.
+def test_stub_provider_when_explicitly_selected() -> None:
     settings = Settings(
         use_stubs=False,
-        edgar_user_agent="no-email",
+        fundamentals_provider="stub",
         fmp_api_key=None,
+        claude_api_key=None,
+        edgar_user_agent="no-email",
+    )
+    providers = build_providers(settings)
+    assert isinstance(providers.fundamentals, StubFundamentalsProvider)
+    assert providers.fundamentals_mode == "stub"
+
+
+def test_partial_credentials_mix_live_and_stub() -> None:
+    """yfinance fundamentals + EDGAR live + Claude stub — the common case."""
+    settings = Settings(
+        use_stubs=False,
+        fundamentals_provider="yfinance",
+        edgar_user_agent="test contact@example.com",
         claude_api_key=None,
     )
     providers = build_providers(settings)
-    assert providers.using_stubs is True
-    assert isinstance(providers.fundamentals, StubFundamentalsProvider)
-    assert isinstance(providers.filings, StubFilingsProvider)
+    assert isinstance(providers.fundamentals, YfinanceFundamentalsProvider)
+    assert providers.filings_mode == "live"
+    assert providers.brief_mode == "stub"
     assert isinstance(providers.brief, StubBriefProvider)

@@ -31,6 +31,11 @@ class Settings(BaseSettings):
         description="Async SQLAlchemy URL. Use sqlite+aiosqlite:///:memory: for tests.",
     )
 
+    fundamentals_provider: str = Field(
+        default="yfinance",
+        description="Which fundamentals backend to use: 'yfinance', 'fmp', or 'stub'.",
+    )
+
     fmp_api_key: SecretStr | None = None
     edgar_user_agent: str = "openbourse contact@example.com"
     claude_api_key: SecretStr | None = None
@@ -38,7 +43,7 @@ class Settings(BaseSettings):
 
     use_stubs: bool = Field(
         default=True,
-        description="When true, providers return fixture data instead of calling external APIs.",
+        description="Master kill-switch — when true every provider becomes a stub.",
     )
 
     log_level: str = "INFO"

@@ -62,12 +62,18 @@ class FmpFundamentalsProvider:
         (net debt / EBITDA, FCF yield), ``/ratios-ttm`` (gross margin), and
         a small slice of ``/income-statement`` to compute YoY revenue growth
         from the latest period against the same period a year ago.
+
+        All four endpoints are wrapped in ``_safe_get`` so a 402 on a
+        plan-restricted ticker produces a clean ``KeyError`` instead of an
+        un-typed httpx stack trace. ``KeyError`` is what
+        :func:`openbourse.screening.lookup.lookup_candidate` translates into
+        a user-facing :class:`TickerLookupError`.
         """
         ticker = ticker.upper()
         profile, km_ttm, rt_ttm, income = await asyncio.gather(
-            self._get("/profile", symbol=ticker),
-            self._get("/key-metrics-ttm", symbol=ticker),
-            self._get("/ratios-ttm", symbol=ticker),
+            self._safe_get("/profile", symbol=ticker),
+            self._safe_get("/key-metrics-ttm", symbol=ticker),
+            self._safe_get("/ratios-ttm", symbol=ticker),
             self._safe_get(
                 "/income-statement",
                 symbol=ticker,
@@ -75,6 +81,27 @@ class FmpFundamentalsProvider:
                 limit=2,
             ),
         )
+
+        # Empty profile means the ticker is either unknown or gated behind a
+        # higher FMP tier — either way we can't show useful fundamentals.
+        if not (isinstance(profile, list) and profile):
+            raise KeyError(
+                f"FMP returned no profile for {ticker} — ticker may be invalid "
+                f"or restricted on your FMP plan tier"
+            )
+
+        # Profile alone gives us market cap and identity, but the screen needs
+        # at least one ratio source. If both TTM endpoints came back empty,
+        # surface a tier-specific message rather than a snapshot full of zeros.
+        km_empty = not (isinstance(km_ttm, list) and km_ttm)
+        rt_empty = not (isinstance(rt_ttm, list) and rt_ttm)
+        if km_empty and rt_empty:
+            raise KeyError(
+                f"FMP profile available for {ticker} but TTM ratios are "
+                f"restricted on your FMP plan tier (got 402 on both "
+                f"/key-metrics-ttm and /ratios-ttm)"
+            )
+
         return _parse_current_fundamentals(ticker, profile, km_ttm, rt_ttm, income)
 
     async def history(
@@ -331,7 +358,7 @@ class StubFundamentalsProvider:
         try:
             return self._fixture[ticker]
         except KeyError as exc:
-            raise KeyError(f"No fixture fundamentals for {ticker}") from exc
+            raise KeyError(f"unknown ticker: {ticker}") from exc
 
     async def history(self, ticker: str, *, limit: int = 8) -> list[FundamentalsSnapshot]:
         """Return up to ``limit`` historical snapshots from the seed fixture."""

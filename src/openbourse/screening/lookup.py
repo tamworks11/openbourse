@@ -48,7 +48,11 @@ async def lookup_candidate(
     try:
         snapshot = await providers.fundamentals.fetch(ticker)
     except KeyError as exc:
-        raise TickerLookupError(f"unknown ticker: {ticker}") from exc
+        # Preserve the provider's message (e.g. "FMP returned no profile for
+        # BB — ticker may be invalid or restricted on your FMP plan tier")
+        # rather than collapsing every KeyError into a generic notice.
+        message = exc.args[0] if exc.args else f"unknown ticker: {ticker}"
+        raise TickerLookupError(message) from exc
 
     score = composite_score(snapshot, weights=weights or Weights())
     return Candidate(

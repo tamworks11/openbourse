@@ -19,6 +19,7 @@ from openbourse.providers.claude import ClaudeBriefProvider, StubBriefProvider
 from openbourse.providers.edgar import EdgarFilingsProvider, StubFilingsProvider
 from openbourse.providers.fmp import FmpFundamentalsProvider, StubFundamentalsProvider
 from openbourse.providers.registry import build_providers
+from openbourse.providers.yfinance import YfinanceFundamentalsProvider
 
 __all__ = [
     "BriefProvider",
@@ -32,5 +33,6 @@ __all__ = [
     "StubBriefProvider",
     "StubFilingsProvider",
     "StubFundamentalsProvider",
+    "YfinanceFundamentalsProvider",
     "build_providers",
 ]

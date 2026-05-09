@@ -1,9 +1,20 @@
-"""Factory selecting real or stubbed providers based on settings.
+"""Factory selecting concrete providers based on settings.
 
-Per-provider fallback: when ``use_stubs`` is false, each provider is
-constructed live *if* its credential is present, and stubbed otherwise.
-This means a working FMP setup keeps working even when the Claude key is
-empty — the brief provider just falls back to the deterministic stub.
+Two layers of selection:
+
+1. ``settings.use_stubs`` is the master kill-switch. When true, every
+   provider is the stub variant — used by the test suite to avoid network.
+
+2. Otherwise:
+   * **Fundamentals** is chosen by ``settings.fundamentals_provider``:
+     ``"yfinance"`` (default, free, no key), ``"fmp"`` (requires key),
+     or ``"stub"``.
+   * **Filings** goes live when the EDGAR User-Agent contains an email,
+     otherwise stub.
+   * **Brief** goes live when a Claude API key is present, otherwise stub.
+
+This per-provider mix-and-match is deliberate — a missing Claude key
+shouldn't disable an otherwise-working FMP/yfinance setup.
 """
 
 from __future__ import annotations
@@ -18,15 +29,13 @@ from openbourse.providers.base import (
 from openbourse.providers.claude import ClaudeBriefProvider, StubBriefProvider
 from openbourse.providers.edgar import EdgarFilingsProvider, StubFilingsProvider
 from openbourse.providers.fmp import FmpFundamentalsProvider, StubFundamentalsProvider
+from openbourse.providers.yfinance import YfinanceFundamentalsProvider
 
 
 def build_providers(settings: Settings | None = None) -> Providers:
-    """Construct the provider bundle.
+    """Construct the provider bundle, dispatching by settings.
 
-    When ``settings.use_stubs`` is true (the default) every provider is a
-    stub. Otherwise each provider is built live where its credential is
-    available and stubbed where it isn't, so contributors can flip on FMP
-    without also needing Claude or vice-versa.
+    See module docstring for the selection rules.
     """
     settings = settings or get_settings()
 
@@ -40,36 +49,9 @@ def build_providers(settings: Settings | None = None) -> Providers:
             brief_mode="stub",
         )
 
-    fmp_key = settings.fmp_api_key.get_secret_value() if settings.fmp_api_key else ""
-    claude_key = settings.claude_api_key.get_secret_value() if settings.claude_api_key else ""
-    edgar_ua = settings.edgar_user_agent
-
-    fundamentals: FundamentalsProvider
-    fundamentals_mode: str
-    if fmp_key:
-        fundamentals = FmpFundamentalsProvider(fmp_key)
-        fundamentals_mode = "live"
-    else:
-        fundamentals = StubFundamentalsProvider()
-        fundamentals_mode = "stub"
-
-    filings: FilingsProvider
-    filings_mode: str
-    if "@" in edgar_ua:
-        filings = EdgarFilingsProvider(edgar_ua)
-        filings_mode = "live"
-    else:
-        filings = StubFilingsProvider()
-        filings_mode = "stub"
-
-    brief: BriefProvider
-    brief_mode: str
-    if claude_key:
-        brief = ClaudeBriefProvider(claude_key, model=settings.claude_model)
-        brief_mode = "live"
-    else:
-        brief = StubBriefProvider()
-        brief_mode = "stub"
+    fundamentals, fundamentals_mode = _build_fundamentals(settings)
+    filings, filings_mode = _build_filings(settings)
+    brief, brief_mode = _build_brief(settings)
 
     return Providers(
         fundamentals=fundamentals,
@@ -79,3 +61,42 @@ def build_providers(settings: Settings | None = None) -> Providers:
         filings_mode=filings_mode,
         brief_mode=brief_mode,
     )
+
+
+def _build_fundamentals(settings: Settings) -> tuple[FundamentalsProvider, str]:
+    """Pick a fundamentals provider based on ``settings.fundamentals_provider``.
+
+    Falls back to the stub if the requested provider can't be constructed
+    (e.g. ``fmp`` without an API key).
+    """
+    choice = (settings.fundamentals_provider or "yfinance").lower()
+
+    if choice == "stub":
+        return StubFundamentalsProvider(), "stub"
+
+    if choice == "fmp":
+        fmp_key = settings.fmp_api_key.get_secret_value() if settings.fmp_api_key else ""
+        if fmp_key:
+            return FmpFundamentalsProvider(fmp_key), "fmp"
+        return StubFundamentalsProvider(), "stub"
+
+    # Default: yfinance. No credentials required.
+    return YfinanceFundamentalsProvider(), "yfinance"
+
+
+def _build_filings(settings: Settings) -> tuple[FilingsProvider, str]:
+    """EDGAR live when the configured User-Agent contains an email."""
+    if "@" in settings.edgar_user_agent:
+        return EdgarFilingsProvider(settings.edgar_user_agent), "live"
+    return StubFilingsProvider(), "stub"
+
+
+def _build_brief(settings: Settings) -> tuple[BriefProvider, str]:
+    """Claude live when a key is set, otherwise the deterministic stub."""
+    claude_key = settings.claude_api_key.get_secret_value() if settings.claude_api_key else ""
+    if claude_key:
+        return (
+            ClaudeBriefProvider(claude_key, model=settings.claude_model),
+            "live",
+        )
+    return StubBriefProvider(), "stub"

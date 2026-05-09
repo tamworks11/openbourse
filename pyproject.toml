@@ -37,6 +37,7 @@ dependencies = [
     "python-dotenv>=1.0,<2.0",
     "rich>=13.7,<15.0",
     "plotext>=5.2,<6.0",
+    "yfinance>=0.2.40,<1.0",
 ]
 
 [project.optional-dependencies]
