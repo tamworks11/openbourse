@@ -87,23 +87,10 @@ class FilterEditorScreen(ModalScreen[ScreenDefinition | None]):
         width: 4;
     }
 
-    FilterEditorScreen #verdict-row {
-        height: 3;
-        align: left middle;
-    }
-
-    FilterEditorScreen #verdict-row > Label {
-        width: auto;
-        margin: 0 1 0 0;
-    }
-
-    FilterEditorScreen #verdict-row Switch {
-        margin: 0 0 0 1;
-    }
-
-    FilterEditorScreen #verdict-row .verdict-label {
-        width: auto;
-        margin: 0 1 0 0;
+    FilterEditorScreen #verdict-section-header {
+        margin-top: 1;
+        color: $accent;
+        text-style: bold;
     }
 
     FilterEditorScreen #filter-buttons {
@@ -180,22 +167,22 @@ class FilterEditorScreen(ModalScreen[ScreenDefinition | None]):
             default=0.0,
             unit="%",
         )
-        yield self._verdict_row()
+        # One Switch + Label per verdict, stacked top-down (best → worst) so
+        # disabling REJECT (a common move) is the bottom toggle and the
+        # alignment with the criterion rows stays consistent.
+        yield Static("Verdicts (post-scoring filter):", id="verdict-section-header")
+        for v in reversed(list(Verdict)):
+            yield self._verdict_row(v)
 
-    def _verdict_row(self) -> Widget:
-        """Build a horizontal strip of one Switch per verdict level.
-
-        ``screen.verdicts is None`` means "all verdicts allowed", so every
-        switch starts on. Toggling any of them off triggers verdict
-        filtering on Apply.
-        """
+    def _verdict_row(self, v: Verdict) -> Widget:
+        """Build one Switch + Label row for a single verdict level."""
         active = self._screen.verdicts
-        children: list[Widget] = [Label("Verdicts:")]
-        for v in Verdict:
-            slug = f"verdict-{v.value.lower()}"
-            children.append(Switch(value=active is None or v in active, id=f"toggle-{slug}"))
-            children.append(Label(v.value, classes="verdict-label"))
-        return Horizontal(*children, id="verdict-row")
+        slug = f"verdict-{v.value.lower()}"
+        return Horizontal(
+            Switch(value=active is None or v in active, id=f"toggle-{slug}"),
+            Label(v.value, classes="field-label"),
+            classes="filter-row",
+        )
 
     def _row(
         self,
