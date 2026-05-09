@@ -45,6 +45,11 @@ class ScreeningService:
         rows = list(universe)
         candidates: list[Candidate] = []
         for instrument, snapshot in rows:
+            # Instrument-level (categorical) filter — cheap set lookup, run
+            # before the numeric snapshot filters so we drop sector-mismatched
+            # rows without paying for any computation downstream.
+            if screen.sectors is not None and (instrument.sector or "") not in screen.sectors:
+                continue
             if not passes_screen(snapshot, screen):
                 continue
             score = composite_score(snapshot, weights=self._weights)

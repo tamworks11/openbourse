@@ -72,6 +72,29 @@ def test_ran_at_is_set() -> None:
     assert result.ran_at.year >= 2026
 
 
+def test_service_sector_filter_excludes_other_sectors(
+    diverse_universe: list[tuple[Instrument, FundamentalsSnapshot]],
+) -> None:
+    """When ``sectors`` is set, instruments outside that set are dropped."""
+    from dataclasses import replace
+
+    base = BUILTIN_SCREENS["all"]
+    only_tech = replace(base, sectors=frozenset({"Technology"}))
+    result = ScreeningService().run(only_tech, diverse_universe)
+    # The diverse_universe fixture includes one Technology name (CDNS) plus
+    # a non-Technology one — only the Technology row should survive.
+    assert all(c.instrument.sector == "Technology" for c in result.candidates)
+    assert len(result.candidates) >= 1
+
+
+def test_service_sector_filter_none_means_pass_through(
+    diverse_universe: list[tuple[Instrument, FundamentalsSnapshot]],
+) -> None:
+    base = BUILTIN_SCREENS["all"]
+    no_filter = ScreeningService().run(base, diverse_universe)
+    assert no_filter.filtered_count == len(diverse_universe)
+
+
 def test_service_verdict_filter_excludes_lower_verdicts(
     diverse_universe: list[tuple[Instrument, FundamentalsSnapshot]],
 ) -> None:

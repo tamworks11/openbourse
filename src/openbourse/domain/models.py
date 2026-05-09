@@ -79,6 +79,7 @@ class ScreenDefinition:
     max_net_debt_to_ebitda: float | None = None
     min_market_cap_usd: float | None = None
     min_fcf_yield_pct: float | None = None
+    sectors: frozenset[str] | None = None
     verdicts: frozenset[Verdict] | None = None
 
 

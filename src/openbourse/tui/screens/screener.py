@@ -446,13 +446,22 @@ class ScreenerScreen(Screen[None]):
         :class:`ScreenDefinition` and re-runs the filter — so flipping a
         Switch immediately reshapes the candidate list. Cancel returns
         ``None`` and the in-memory screen is left untouched.
+
+        We pass the universe's distinct sectors into the editor so its
+        sector toggles only show categories that are actually present in
+        the loaded data — no clutter for sectors the user has no rows for.
         """
         from openbourse.tui.screens.filters import FilterEditorScreen
 
         self.app.push_screen(
-            FilterEditorScreen(self._screen),
+            FilterEditorScreen(self._screen, known_sectors=self._known_sectors()),
             self._on_filter_editor_dismissed,
         )
+
+    def _known_sectors(self) -> tuple[str, ...]:
+        """Return the alphabetically-sorted distinct sectors in the universe."""
+        sectors = {inst.sector for inst, _ in self._universe if inst.sector}
+        return tuple(sorted(sectors))
 
     def _on_filter_editor_dismissed(self, new_screen: ScreenDefinition | None) -> None:
         """Apply the returned screen if any; redraw the screener."""

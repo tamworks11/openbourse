@@ -25,6 +25,16 @@ from textual.widgets import Button, Input, Label, Static, Switch
 from openbourse.domain import ScreenDefinition, Verdict
 
 
+def _sector_toggle_id(sector: str) -> str:
+    """Sector names contain spaces and ampersands; translate to a CSS-safe id.
+
+    Reversal isn't required — the editor only writes these IDs and looks
+    them up by the same transform when reading switch state back out.
+    """
+    safe = "".join(c.lower() if c.isalnum() else "-" for c in sector)
+    return f"toggle-sector-{safe}"
+
+
 class FilterEditorScreen(ModalScreen[ScreenDefinition | None]):
     """Modal that lets the user toggle and tune the active screen's filters."""
 
@@ -87,7 +97,8 @@ class FilterEditorScreen(ModalScreen[ScreenDefinition | None]):
         width: 4;
     }
 
-    FilterEditorScreen #verdict-section-header {
+    FilterEditorScreen #verdict-section-header,
+    FilterEditorScreen #sector-section-header {
         margin-top: 1;
         color: $accent;
         text-style: bold;
@@ -104,9 +115,19 @@ class FilterEditorScreen(ModalScreen[ScreenDefinition | None]):
     }
     """
 
-    def __init__(self, screen: ScreenDefinition) -> None:
+    def __init__(
+        self,
+        screen: ScreenDefinition,
+        *,
+        known_sectors: tuple[str, ...] = (),
+    ) -> None:
         super().__init__()
         self._screen = screen
+        # ``known_sectors`` is the alphabetically-sorted set of sector names
+        # actually present in the loaded universe — we don't show toggles
+        # for sectors the user has no data for. Empty tuple → no sector
+        # section at all.
+        self._known_sectors = tuple(known_sectors)
 
     def compose(self) -> ComposeResult:
         """Render the modal: title, description, one row per criterion, buttons."""
@@ -174,6 +195,13 @@ class FilterEditorScreen(ModalScreen[ScreenDefinition | None]):
         for v in reversed(list(Verdict)):
             yield self._verdict_row(v)
 
+        # Sector section is only rendered when the universe actually contains
+        # sectored instruments — keeps the modal compact for stub-only datasets.
+        if self._known_sectors:
+            yield Static("Sectors:", id="sector-section-header")
+            for sector in self._known_sectors:
+                yield self._sector_row(sector)
+
     def _verdict_row(self, v: Verdict) -> Widget:
         """Build one Switch + Label row for a single verdict level."""
         active = self._screen.verdicts
@@ -181,6 +209,18 @@ class FilterEditorScreen(ModalScreen[ScreenDefinition | None]):
         return Horizontal(
             Switch(value=active is None or v in active, id=f"toggle-{slug}"),
             Label(v.value, classes="field-label"),
+            classes="filter-row",
+        )
+
+    def _sector_row(self, sector: str) -> Widget:
+        """Build one Switch + Label row for a single sector."""
+        active = self._screen.sectors
+        return Horizontal(
+            Switch(
+                value=active is None or sector in active,
+                id=_sector_toggle_id(sector),
+            ),
+            Label(sector, classes="field-label"),
             classes="filter-row",
         )
 
@@ -244,8 +284,27 @@ class FilterEditorScreen(ModalScreen[ScreenDefinition | None]):
             max_net_debt_to_ebitda=self._read_field("net-debt"),
             min_market_cap_usd=self._read_field("mkt-cap", multiplier=1e9),
             min_fcf_yield_pct=self._read_field("fcf-yield"),
+            sectors=self._read_sector_filter(),
             verdicts=self._read_verdict_filter(),
         )
+
+    def _read_sector_filter(self) -> frozenset[str] | None:
+        """Read the dynamic sector switches; ``None`` when all are on or none exist.
+
+        With no known sectors there's nothing to filter, so we mirror the
+        unset state. Same collapse-to-None rule applies as for verdicts: if
+        every available sector is enabled, the filter is effectively off.
+        """
+        if not self._known_sectors:
+            return None
+        selected: set[str] = set()
+        for sector in self._known_sectors:
+            switch = self.query_one(f"#{_sector_toggle_id(sector)}", Switch)
+            if switch.value:
+                selected.add(sector)
+        if len(selected) == len(self._known_sectors):
+            return None
+        return frozenset(selected)
 
     def _read_verdict_filter(self) -> frozenset[Verdict] | None:
         """Read the four verdict switches; return ``None`` when all are on.
