@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Protocol, runtime_checkable
 
-from openbourse.domain import AiBrief, FundamentalsSnapshot, Instrument
+from openbourse.domain import AiBrief, ConcernFinding, FundamentalsSnapshot, Instrument
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +79,16 @@ class FilingsProvider(Protocol):
         """Return up to ``limit`` recent filings for ``cik``, newest first."""
         ...
 
+    async def fetch_document(self, filing: Filing) -> str:
+        """Return the primary document (typically HTML) for ``filing``.
+
+        Used by the concern scanner to pull 10-K text for evidence-based
+        analysis. Implementations should return the raw response body —
+        callers handle markup stripping. Stub providers can return an
+        empty string when no canned document is available.
+        """
+        ...
+
 
 @runtime_checkable
 class BriefProvider(Protocol):
@@ -102,11 +112,40 @@ class BriefProvider(Protocol):
         ...
 
 
+@runtime_checkable
+class ConcernScanner(Protocol):
+    """Scans 10-K filing text for evidence of user-defined concerns.
+
+    Distinct from :class:`BriefProvider` — the brief provider asks the LLM
+    to *summarize* a company; the concern scanner asks it to *find evidence*
+    in primary-source filing text and return verbatim quotes. Separating
+    them keeps prompts focused, lets us cache scans independently, and
+    means a brief regeneration doesn't pay for an expensive re-scan.
+    """
+
+    async def scan(
+        self,
+        *,
+        ticker: str,
+        filing_text: str,
+        concerns: list[str],
+    ) -> list[ConcernFinding]:
+        """Return one :class:`ConcernFinding` per concern in ``concerns``.
+
+        ``filing_text`` is typically the Item 1A. Risk Factors section.
+        Implementations must produce a finding for every supplied concern,
+        defaulting to ``status="unknown"`` when the text doesn't contain
+        evidence either way. Quotes in ``note`` should be verbatim from
+        ``filing_text``; do not paraphrase.
+        """
+        ...
+
+
 @dataclass(frozen=True, slots=True)
 class Providers:
     """Bundle of every provider the application needs.
 
-    The three ``*_mode`` fields are either ``"live"`` or ``"stub"`` per
+    The four ``*_mode`` fields are either ``"live"`` or ``"stub"`` per
     provider. They power the status-bar indicators and let the registry
     mix-and-match so a missing Claude key doesn't disable a working FMP
     setup.
@@ -115,9 +154,11 @@ class Providers:
     fundamentals: FundamentalsProvider
     filings: FilingsProvider
     brief: BriefProvider
+    scanner: ConcernScanner
     fundamentals_mode: str = field(default="stub")
     filings_mode: str = field(default="stub")
     brief_mode: str = field(default="stub")
+    scanner_mode: str = field(default="stub")
 
     @property
     def using_stubs(self) -> bool:
@@ -126,6 +167,7 @@ class Providers:
             self.fundamentals_mode == "stub"
             and self.filings_mode == "stub"
             and self.brief_mode == "stub"
+            and self.scanner_mode == "stub"
         )
 
     @property
@@ -135,4 +177,5 @@ class Providers:
             self.fundamentals_mode == "live"
             and self.filings_mode == "live"
             and self.brief_mode == "live"
+            and self.scanner_mode == "live"
         )

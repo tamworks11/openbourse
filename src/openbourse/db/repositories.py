@@ -2,13 +2,32 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from openbourse.db.models import FundamentalsRow, InstrumentRow, WatchlistRow
-from openbourse.domain import FundamentalsSnapshot, Instrument
+from openbourse.db.models import (
+    ConcernScanRow,
+    FundamentalsRow,
+    InstrumentRow,
+    WatchlistRow,
+)
+from openbourse.domain import ConcernFinding, FundamentalsSnapshot, Instrument
+
+
+def hash_concerns(concerns: list[str]) -> str:
+    """Deterministic hex digest of a concern list for cache-key building.
+
+    Sorted-and-stripped so cache hits aren't sensitive to list ordering or
+    surrounding whitespace, but case is preserved (concerns differ in
+    intent at "SBC" vs "sbc" frequencies).
+    """
+    normalized = sorted(c.strip() for c in concerns if c.strip())
+    blob = "\n".join(normalized).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()[:32]
 
 
 def _to_instrument(row: InstrumentRow) -> Instrument:
@@ -217,3 +236,75 @@ class WatchlistRepository:
             await self.session.scalars(select(WatchlistRow.ticker).order_by(WatchlistRow.ticker))
         ).all()
         return list(rows)
+
+
+class ConcernScanRepository:
+    """Get/save cached 10-K concern-scan results.
+
+    Cache key is ``(accession_number, hash(concerns))``. Saving the same
+    key twice is idempotent — we delete and re-insert rather than upsert
+    because the row count is small (one per filing per concern set) and
+    the simpler code wins.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get(
+        self, *, accession_number: str, concerns: list[str]
+    ) -> list[ConcernFinding] | None:
+        """Return cached findings for this filing+concerns pair, if any."""
+        digest = hash_concerns(concerns)
+        row = await self.session.scalar(
+            select(ConcernScanRow).where(
+                ConcernScanRow.accession_number == accession_number,
+                ConcernScanRow.concerns_hash == digest,
+            )
+        )
+        if row is None:
+            return None
+        return [_finding_from_dict(d) for d in row.findings]
+
+    async def save(
+        self,
+        *,
+        accession_number: str,
+        concerns: list[str],
+        findings: list[ConcernFinding],
+        model: str,
+    ) -> None:
+        """Replace any existing cache entry for this filing+concerns pair."""
+        digest = hash_concerns(concerns)
+        existing = await self.session.scalar(
+            select(ConcernScanRow).where(
+                ConcernScanRow.accession_number == accession_number,
+                ConcernScanRow.concerns_hash == digest,
+            )
+        )
+        payload = [_finding_to_dict(f) for f in findings]
+        if existing is None:
+            self.session.add(
+                ConcernScanRow(
+                    accession_number=accession_number,
+                    concerns_hash=digest,
+                    model=model,
+                    findings=payload,
+                )
+            )
+        else:
+            existing.findings = payload
+            existing.model = model
+
+
+def _finding_to_dict(f: ConcernFinding) -> dict[str, object]:
+    """Serialize a :class:`ConcernFinding` to JSON-friendly dict."""
+    return {"concern": f.concern, "status": f.status, "note": f.note}
+
+
+def _finding_from_dict(d: dict[str, object]) -> ConcernFinding:
+    """Hydrate a :class:`ConcernFinding` from a stored dict."""
+    return ConcernFinding(
+        concern=str(d.get("concern", "")),
+        status=str(d.get("status", "unknown")),
+        note=str(d.get("note", "")),
+    )

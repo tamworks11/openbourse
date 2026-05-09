@@ -51,6 +51,17 @@ class EdgarFilingsProvider:
         response.raise_for_status()
         return _parse_submissions(padded, response.json(), limit=limit)
 
+    async def fetch_document(self, filing: Filing) -> str:
+        """Fetch the primary document for ``filing`` as a UTF-8 string.
+
+        EDGAR primary documents are HTML for modern filings; the caller is
+        responsible for stripping markup. We just guarantee the bytes
+        decode cleanly.
+        """
+        response = await self._client.get(filing.url)
+        response.raise_for_status()
+        return response.text
+
     async def aclose(self) -> None:
         """Close the underlying HTTP client if this provider owns it."""
         if self._owns_client:
@@ -96,6 +107,10 @@ class StubFilingsProvider:
         """Return up to ``limit`` fixture filings for ``cik`` (empty list if unknown)."""
         padded = _zero_pad_cik(cik)
         return self._fixture.get(padded, [])[:limit]
+
+    async def fetch_document(self, filing: Filing) -> str:  # pragma: no cover
+        """Stub returns an empty string — there's no canned 10-K text to scan."""
+        return ""
 
 
 def _load_default_fixture() -> dict[str, list[Filing]]:

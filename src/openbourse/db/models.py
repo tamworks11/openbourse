@@ -153,3 +153,31 @@ class AiBriefRow(Base):
     payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
 
     instrument: Mapped[InstrumentRow] = relationship(back_populates="briefs")
+
+
+class ConcernScanRow(Base):
+    """Cached result of scanning a 10-K filing for user-defined concerns.
+
+    Cache key is ``(accession_number, concerns_hash)``. The hash means a
+    change to the concern list invalidates only the scans that would
+    return different results — a user adding a concern doesn't blow away
+    findings for the unchanged ones.
+
+    Findings are stored as JSON: ``[{"concern", "status", "note"}, ...]``.
+    """
+
+    __tablename__ = "concern_scans"
+    __table_args__ = (
+        UniqueConstraint(
+            "accession_number", "concerns_hash", name="uq_concern_scans_key"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    accession_number: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    concerns_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    scanned_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+    findings: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)

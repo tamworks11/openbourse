@@ -9,6 +9,7 @@ from openbourse.db.engine import (
 from openbourse.db.models import (
     AiBriefRow,
     Base,
+    ConcernScanRow,
     FundamentalsRow,
     InstrumentRow,
     ScreenRow,
@@ -19,6 +20,7 @@ from openbourse.db.models import (
 __all__ = [
     "AiBriefRow",
     "Base",
+    "ConcernScanRow",
     "FundamentalsRow",
     "InstrumentRow",
     "ScreenRow",

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import date
 from typing import ClassVar
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from textual.app import ComposeResult
 from textual.binding import BindingType
 from textual.containers import VerticalScroll
@@ -14,11 +16,14 @@ from textual.widgets import Footer, LoadingIndicator, Static
 from openbourse.domain import (
     AiBrief,
     Candidate,
+    ConcernFinding,
     FundamentalsSnapshot,
     ScreenDefinition,
 )
-from openbourse.providers import Providers
+from openbourse.providers import Filing, Providers
 from openbourse.screening import compute_style_fit
+from openbourse.screening.concerns import DEFAULT_CONCERNS
+from openbourse.screening.risk_factors import extract_risk_factors
 from openbourse.tui.widgets import HistoryCharts, PriceChart
 
 _CONCERN_GLYPHS = {
@@ -79,6 +84,7 @@ class BriefScreen(Screen[None]):
         ("escape", "app.pop_screen", "Back"),
         ("b", "app.pop_screen", "Back"),
         ("d", "download_history", "Download history"),
+        ("r", "rescan_concerns", "Rescan concerns"),
     ]
 
     def __init__(
@@ -96,6 +102,12 @@ class BriefScreen(Screen[None]):
         # The active screen is used to compute the style-fit %; a None
         # screen (e.g., from `bourse lookup`) skips that section.
         self._screen = screen
+        # Holds the latest brief so the scanner worker can swap in better
+        # concerns and re-render without re-fetching everything else.
+        self._brief: AiBrief | None = None
+        # Cached filings list so the manual rescan action can re-trigger
+        # the worker without going back to the filings provider.
+        self._filings: list[Filing] = []
 
     def compose(self) -> ComposeResult:
         """Render a full-width header, history charts, and the AI brief body."""
@@ -153,8 +165,6 @@ class BriefScreen(Screen[None]):
         """
         import asyncio
 
-        from openbourse.providers.base import Filing
-
         c = self._candidate
 
         async def _fetch_filings() -> list[Filing]:
@@ -176,8 +186,123 @@ class BriefScreen(Screen[None]):
         filings, price_points = await asyncio.gather(_fetch_filings(), _fetch_prices())
         # The brief generator depends on filings, so it runs after them.
         brief = await self._providers.brief.write_brief(c.instrument, c.snapshot, filings)
+        self._brief = brief
+        self._filings = filings
         self._render_brief(brief)
         await self._render_price_chart(price_points)
+        # Kick off the deep-scan worker as a separate task. Done in the
+        # background so the user sees the brief immediately and the
+        # concerns section gets refined when the scan completes.
+        if filings:
+            self.run_worker(
+                self._scan_concerns(filings),
+                name="concern_scan",
+                exclusive=False,
+            )
+
+    async def _scan_concerns(
+        self, filings: list[Filing], *, force: bool = False
+    ) -> None:
+        """Refine the brief's concerns section with evidence from a 10-K scan.
+
+        Steps:
+        1. Pick the most recent 10-K from ``filings``.
+        2. Check the DB cache by ``(accession, concerns_hash)``.
+        3. On miss (or when ``force=True``), fetch the document, extract
+           Item 1A, run the scanner, and persist the result.
+        4. Merge findings into ``self._brief`` and re-render.
+
+        Failures at any step are silent — the user already has the lighter
+        concern findings from the brief generator, and the scan refinement
+        is opportunistic.
+
+        ``force=True`` bypasses the cache and is used by the manual rescan
+        action. The fresh result still lands in the cache so subsequent
+        passive visits benefit from the rescan.
+        """
+        from openbourse.config import get_settings
+        from openbourse.db.engine import create_engine_from_url, get_session_factory
+
+        ten_k = next((f for f in filings if f.form_type.upper() == "10-K"), None)
+        if ten_k is None or self._brief is None:
+            return
+
+        concerns = list(DEFAULT_CONCERNS)
+        engine = create_engine_from_url(get_settings().database_url)
+        factory = get_session_factory(engine)
+        try:
+            findings = await self._scan_with_cache(
+                factory, ten_k, concerns, force=force
+            )
+        except Exception:  # pragma: no cover - background polish task
+            return
+        finally:
+            await engine.dispose()
+
+        if not findings:
+            return
+        self._brief = dataclasses.replace(self._brief, concerns=tuple(findings))
+        self._render_brief(self._brief)
+
+    async def _scan_with_cache(
+        self,
+        factory: async_sessionmaker[AsyncSession],
+        filing: Filing,
+        concerns: list[str],
+        *,
+        force: bool = False,
+    ) -> list[ConcernFinding]:
+        """Cache-aware wrapper around the scanner provider.
+
+        Returns the findings from the cache if present, otherwise fetches
+        the filing text, runs the scanner, persists the result, and
+        returns it. Empty list signals "scan unavailable" — the caller
+        should leave the existing brief findings in place.
+
+        When ``force=True`` the cache lookup is skipped (but a successful
+        scan still updates the cache). Use this for the manual rescan
+        action where the user wants fresh evidence even if a cache entry
+        exists — e.g., after a new 10-K is filed but before our cache key
+        catches up.
+        """
+        from openbourse.db.repositories import ConcernScanRepository
+
+        if not force:
+            async with factory() as session:
+                repo = ConcernScanRepository(session)
+                cached = await repo.get(
+                    accession_number=filing.accession_number, concerns=concerns
+                )
+                if cached is not None:
+                    return cached
+
+        try:
+            html = await self._providers.filings.fetch_document(filing)
+        except (OSError, ValueError):
+            return []
+        if not html.strip():
+            return []
+        section = extract_risk_factors(html)
+        if not section:
+            return []
+        findings = await self._providers.scanner.scan(
+            ticker=self._candidate.instrument.ticker,
+            filing_text=section,
+            concerns=concerns,
+        )
+        if not findings:
+            return []
+
+        async with factory() as session:
+            repo = ConcernScanRepository(session)
+            await repo.save(
+                accession_number=filing.accession_number,
+                concerns=concerns,
+                findings=findings,
+                model=self._brief.model if self._brief else "unknown",
+            )
+            await session.commit()
+        return findings
 
     async def _render_price_chart(self, points: list[tuple[date, float]]) -> None:
         """Replace the empty placeholder PriceChart with one bound to ``points``."""
@@ -193,6 +318,57 @@ class BriefScreen(Screen[None]):
         self.query_one("#brief-loading", LoadingIndicator).display = False
         body = self.query_one("#brief-body", Static)
         body.update(_format_brief_body(brief))
+
+    def action_rescan_concerns(self) -> None:
+        """Force a fresh 10-K concern scan, bypassing the DB cache.
+
+        Useful when a new filing has been published but our cache key
+        still points at the prior accession, or when the user wants to
+        re-run the scan against an updated concerns list. The fresh
+        result still lands in the cache so subsequent passive visits
+        benefit from the rescan.
+        """
+        ticker = self._candidate.instrument.ticker
+        if not self._filings:
+            self.app.notify(
+                f"No filings cached for {ticker} — open a brief with EDGAR access first.",
+                title="Rescan unavailable",
+                severity="warning",
+                timeout=4,
+            )
+            return
+        if not any(f.form_type.upper() == "10-K" for f in self._filings):
+            self.app.notify(
+                f"No 10-K available for {ticker}.",
+                title="Rescan unavailable",
+                severity="warning",
+                timeout=4,
+            )
+            return
+        self.app.notify(
+            f"Rescanning {ticker} 10-K against current concerns…",
+            title="Concern rescan",
+            timeout=2,
+        )
+        self.run_worker(
+            self._rescan_worker(),
+            name="concern_rescan",
+            exclusive=False,
+        )
+
+    async def _rescan_worker(self) -> None:
+        """Worker body for :meth:`action_rescan_concerns`.
+
+        Wraps :meth:`_scan_concerns` with a final notify so the user
+        sees a confirmation when the fresh evidence has landed in the
+        UI (the body update happens silently otherwise).
+        """
+        await self._scan_concerns(self._filings, force=True)
+        self.app.notify(
+            f"Concern scan complete for {self._candidate.instrument.ticker}.",
+            title="Concern rescan",
+            timeout=3,
+        )
 
     def action_download_history(self) -> None:
         """Pull annual history from the live provider, persist, and refresh charts.

@@ -10,6 +10,7 @@ implementations based on :class:`openbourse.config.Settings`.
 
 from openbourse.providers.base import (
     BriefProvider,
+    ConcernScanner,
     Filing,
     FilingsProvider,
     FundamentalsProvider,
@@ -19,11 +20,14 @@ from openbourse.providers.claude import ClaudeBriefProvider, StubBriefProvider
 from openbourse.providers.edgar import EdgarFilingsProvider, StubFilingsProvider
 from openbourse.providers.fmp import FmpFundamentalsProvider, StubFundamentalsProvider
 from openbourse.providers.registry import build_providers
+from openbourse.providers.scanner import ClaudeConcernScanner, StubConcernScanner
 from openbourse.providers.yfinance import YfinanceFundamentalsProvider
 
 __all__ = [
     "BriefProvider",
     "ClaudeBriefProvider",
+    "ClaudeConcernScanner",
+    "ConcernScanner",
     "EdgarFilingsProvider",
     "Filing",
     "FilingsProvider",
@@ -31,6 +35,7 @@ __all__ = [
     "FundamentalsProvider",
     "Providers",
     "StubBriefProvider",
+    "StubConcernScanner",
     "StubFilingsProvider",
     "StubFundamentalsProvider",
     "YfinanceFundamentalsProvider",

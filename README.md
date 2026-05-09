@@ -23,9 +23,14 @@ short business description from the data provider.
 
 ![Screener](docs/screenshots/screener.svg)
 
-The brief screen — fundamentals header, 2×2 grid of annual history
-charts, and an AI-generated qualitative summary (stub provider shown
-here; live with an `OPENBOURSE_CLAUDE_API_KEY`).
+The brief screen — fundamentals header with style-fit %, 2×2 grid of
+annual history charts, and a structured AI brief: Summary, Bull case,
+Bear case, Risks to monitor, plus a user-defined Concerns checklist.
+With a Claude API key the concerns section gets refined in place by a
+background worker that pulls the company's most-recent 10-K from EDGAR,
+extracts Item 1A. Risk Factors, and surfaces verbatim quotes as
+evidence — fabricated quotes are dropped post-hoc. Scan results are
+cached, so repeat visits don't re-pay for the call.
 
 ![Brief screen with charts](docs/screenshots/brief.svg)
 
@@ -44,9 +49,9 @@ candidates list re-runs in place.
   business descriptions, fast-scroll keys, and a `bourse>` command bar.
 - **Free by default** — yfinance for fundamentals, no API key. FMP and
   Anthropic Claude are optional upgrades via env vars.
-- **Pluggable providers** — `FundamentalsProvider`, `FilingsProvider`, and
-  `BriefProvider` share a small async Protocol; swap implementations
-  without touching call sites.
+- **Pluggable providers** — `FundamentalsProvider`, `FilingsProvider`,
+  `BriefProvider`, and `ConcernScanner` share small async Protocols; swap
+  implementations without touching call sites.
 - **Editable filters** — toggle each criterion on or off and tweak
   thresholds from inside the TUI (`f` key). Verdict-level filtering too.
 - **Transparent scoring** — composite score and verdict thresholds are pure

@@ -22,6 +22,7 @@ from __future__ import annotations
 from openbourse.config import Settings, get_settings
 from openbourse.providers.base import (
     BriefProvider,
+    ConcernScanner,
     FilingsProvider,
     FundamentalsProvider,
     Providers,
@@ -29,6 +30,7 @@ from openbourse.providers.base import (
 from openbourse.providers.claude import ClaudeBriefProvider, StubBriefProvider
 from openbourse.providers.edgar import EdgarFilingsProvider, StubFilingsProvider
 from openbourse.providers.fmp import FmpFundamentalsProvider, StubFundamentalsProvider
+from openbourse.providers.scanner import ClaudeConcernScanner, StubConcernScanner
 from openbourse.providers.yfinance import YfinanceFundamentalsProvider
 
 
@@ -44,22 +46,27 @@ def build_providers(settings: Settings | None = None) -> Providers:
             fundamentals=StubFundamentalsProvider(),
             filings=StubFilingsProvider(),
             brief=StubBriefProvider(),
+            scanner=StubConcernScanner(),
             fundamentals_mode="stub",
             filings_mode="stub",
             brief_mode="stub",
+            scanner_mode="stub",
         )
 
     fundamentals, fundamentals_mode = _build_fundamentals(settings)
     filings, filings_mode = _build_filings(settings)
     brief, brief_mode = _build_brief(settings)
+    scanner, scanner_mode = _build_scanner(settings)
 
     return Providers(
         fundamentals=fundamentals,
         filings=filings,
         brief=brief,
+        scanner=scanner,
         fundamentals_mode=fundamentals_mode,
         filings_mode=filings_mode,
         brief_mode=brief_mode,
+        scanner_mode=scanner_mode,
     )
 
 
@@ -105,3 +112,14 @@ def _build_brief(settings: Settings) -> tuple[BriefProvider, str]:
             "live",
         )
     return StubBriefProvider(), "stub"
+
+
+def _build_scanner(settings: Settings) -> tuple[ConcernScanner, str]:
+    """Concern scanner shares the Claude key with the brief provider."""
+    claude_key = settings.claude_api_key.get_secret_value() if settings.claude_api_key else ""
+    if claude_key:
+        return (
+            ClaudeConcernScanner(claude_key, model=settings.claude_model),
+            "live",
+        )
+    return StubConcernScanner(), "stub"

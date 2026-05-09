@@ -22,6 +22,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   aggressiveness, …) and renders a per-concern flagged/clear/unknown
   status. The list can be overridden per `write_brief` call; an editor UI
   is on the roadmap.
+- **Filing-text concern scanner** — separate `ConcernScanner` provider that
+  pulls the actual 10-K Risk Factors section from EDGAR and asks Claude
+  to find verbatim evidence for each concern. Quotes returned by the
+  model are validated against the filing text — fabricated quotes are
+  dropped. Runs as a background worker on the brief screen so the
+  initial brief renders instantly and the concerns section refines in
+  place when the scan completes. Results are cached in a new
+  `concern_scans` table keyed by `(accession, concerns_hash)` so repeat
+  visits hit the cache instead of re-paying for the LLM call.
+- **Manual rescan** — press `r` on the brief screen to force a fresh
+  concern scan that bypasses the cache. Useful when a new 10-K has been
+  filed but our cache key still points at the prior accession.
+  Successful rescans still update the cache.
 
 ### Changed
 

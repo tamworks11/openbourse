@@ -16,6 +16,7 @@ from openbourse.providers.base import Providers
 from openbourse.providers.claude import StubBriefProvider
 from openbourse.providers.edgar import StubFilingsProvider
 from openbourse.providers.fmp import StubFundamentalsProvider
+from openbourse.providers.scanner import StubConcernScanner
 
 
 @pytest.fixture
@@ -105,7 +106,9 @@ def stub_providers() -> Providers:
         fundamentals=StubFundamentalsProvider(),
         filings=StubFilingsProvider(),
         brief=StubBriefProvider(),
+        scanner=StubConcernScanner(),
         fundamentals_mode="stub",
         filings_mode="stub",
         brief_mode="stub",
+        scanner_mode="stub",
     )
