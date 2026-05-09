@@ -64,6 +64,8 @@ def format_active_filters(screen: ScreenDefinition) -> str:
             parts.append(f"mkt cap ≥${cap:g}")
     if screen.min_fcf_yield_pct is not None:
         parts.append(f"FCF yield ≥{screen.min_fcf_yield_pct:g}%")
+    if screen.max_risk_score is not None:
+        parts.append(f"risk ≤{screen.max_risk_score}")
     if screen.sectors is not None:
         # Alphabetical so "Healthcare, Technology" reads predictably regardless
         # of set-iteration order.

@@ -35,6 +35,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   concern scan that bypasses the cache. Useful when a new 10-K has been
   filed but our cache key still points at the prior accession.
   Successful rescans still update the cache.
+- **Risk score (0-100) + risk-tolerance filter** — new pure-function
+  metric in `screening.risk` that captures vulnerability (high leverage,
+  small cap, thin margins, low FCF yield) as a single transparent
+  number. Filterable as `max_risk_score` in the screen definition; the
+  filter editor adds a "Risk score ≤ N" row alongside the existing
+  threshold knobs. Surfaces on the screener detail pane and brief header
+  next to the existing composite score, so a high-quality but high-risk
+  name is visibly distinct from a high-quality low-risk name. Lookup CLI
+  output (text + JSON) includes the risk score.
+- **Risk-band glyph in tickers table** — new `RISK` column shows a
+  coloured `●` plus the score: green for low (≤30), yellow for moderate
+  (30-60), red for high (≥60). Same colouring is applied to the `Risk N`
+  value in the detail pane and brief header for consistency, so the user
+  can scan the screener for high-risk outliers at a glance.
+### Changed
+
+- **yfinance history default 4 → 8 years** — the small fundamentals
+  charts on the brief screen now render up to 7 data points (8 minus the
+  YoY pad) instead of 3, giving more historical context per metric.
+  `history_period` also bumped from 6y to 10y so the underlying
+  price/statement fetch has the data it needs. FMP's default stays at 4
+  to keep free-tier requests under FMP's 5-row endpoint cap; FMP paid
+  users can override.
 
 ### Changed
 

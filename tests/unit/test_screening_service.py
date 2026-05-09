@@ -118,6 +118,39 @@ def test_service_verdict_filter_none_means_pass_through(
     assert no_filter.filtered_count == len(diverse_universe)
 
 
+def test_service_attaches_risk_score_to_each_candidate(
+    diverse_universe: list[tuple[Instrument, FundamentalsSnapshot]],
+) -> None:
+    """Every candidate the service emits should carry a 0-100 risk_score."""
+    result = ScreeningService().run(BUILTIN_SCREENS["all"], diverse_universe)
+    assert result.filtered_count >= 1
+    for c in result.candidates:
+        assert 0 <= c.risk_score <= 100
+
+
+def test_service_max_risk_filter_drops_high_risk_rows(
+    diverse_universe: list[tuple[Instrument, FundamentalsSnapshot]],
+) -> None:
+    """A tight risk ceiling drops the levered low-quality row even if no
+    other criterion would have rejected it."""
+    base = BUILTIN_SCREENS["all"]  # no other thresholds
+    conservative = replace(base, max_risk_score=40)
+    result = ScreeningService().run(conservative, diverse_universe)
+    tickers = {c.instrument.ticker for c in result.candidates}
+    # Ford-like row carries the highest risk in the fixture; should be dropped.
+    assert "F" not in tickers
+    assert all(c.risk_score <= 40 for c in result.candidates)
+
+
+def test_service_max_risk_filter_none_means_pass_through(
+    diverse_universe: list[tuple[Instrument, FundamentalsSnapshot]],
+) -> None:
+    """``max_risk_score=None`` should leave the unfiltered universe intact."""
+    base = BUILTIN_SCREENS["all"]
+    no_filter = ScreeningService().run(base, diverse_universe)
+    assert no_filter.filtered_count == len(diverse_universe)
+
+
 def test_tie_break_is_alphabetical_by_ticker() -> None:
     snap = FundamentalsSnapshot(
         ticker="A",

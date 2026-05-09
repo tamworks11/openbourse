@@ -33,6 +33,21 @@ _CONCERN_GLYPHS = {
 }
 
 
+def _risk_color(risk_score: int) -> str:
+    """Map a 0-100 risk score to its band colour.
+
+    Mirror of :func:`openbourse.tui.screens.screener._risk_glyph_color` —
+    duplicated rather than imported to avoid the circular dependency
+    between the brief and screener modules. Bands match README.md:
+    0-30 low (green), 30-60 moderate (yellow), 60-100 high (red).
+    """
+    if risk_score <= 30:
+        return "green"
+    if risk_score < 60:
+        return "yellow"
+    return "red"
+
+
 def _format_brief_body(brief: AiBrief) -> str:
     """Render an :class:`AiBrief` as a Rich-marked-up multi-section block.
 
@@ -126,7 +141,9 @@ class BriefScreen(Screen[None]):
             f"GM [b]{snap.gross_margin_pct:.1f}%[/b]  ·  "
             f"Net debt/EBITDA [b]{snap.net_debt_to_ebitda:.2f}x[/b]  ·  "
             f"FCF yld [b]{snap.fcf_yield_pct:.1f}%[/b]\n"
-            f"Score [b]{c.score}[/b]"
+            f"Score [b]{c.score}[/b]    "
+            f"Risk [b {_risk_color(c.risk_score)}]{c.risk_score}"
+            f"[/b {_risk_color(c.risk_score)}]"
         )
         if self._screen is not None:
             fit_pct = compute_style_fit(snap, self._screen)

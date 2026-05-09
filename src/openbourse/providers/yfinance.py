@@ -43,7 +43,12 @@ HISTORY_LOOKBACK_PAD = 1  # annual period → YoY needs 1 prior year
 class YfinanceFundamentalsProvider:
     """Yahoo Finance client. Free, unlimited (in practice), no SLA."""
 
-    def __init__(self, *, history_period: str = "6y", price_interval: str = "1mo") -> None:
+    def __init__(self, *, history_period: str = "10y", price_interval: str = "1mo") -> None:
+        # 10y of price + statement history feeds up to ~9 annual snapshots
+        # before YoY trimming. Empirically yfinance returns 4-5 fiscal
+        # years of statements regardless of period, but extending the
+        # price history is what lets us estimate market cap correctly at
+        # older statement dates.
         self._history_period = history_period
         self._price_interval = price_interval
 
@@ -86,8 +91,15 @@ class YfinanceFundamentalsProvider:
         rows = await asyncio.to_thread(_get_price_history, ticker, period, interval)
         return rows
 
-    async def history(self, ticker: str, *, limit: int = 4) -> list[FundamentalsSnapshot]:
+    async def history(self, ticker: str, *, limit: int = 8) -> list[FundamentalsSnapshot]:
         """Return up to ``limit`` annual snapshots computed from Yahoo statements.
+
+        Default raised from 4 to 8 so the brief screen's 2x2 fundamentals
+        grid renders 7 data points (8 minus the 1-year YoY pad) per
+        chart instead of 3, which materially improves the hover
+        readout's precision. Yahoo doesn't actually expose 8 years of
+        annual statements for every ticker — this is an upper bound,
+        and the provider returns whatever it can produce.
 
         Yahoo's free annual data goes back ~4-5 years. After dropping the
         oldest year (used as the YoY comparable), the chart shows 3-4 points.

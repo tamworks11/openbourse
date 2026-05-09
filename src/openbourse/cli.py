@@ -285,6 +285,7 @@ def lookup(
             "instrument": asdict(candidate.instrument),
             "snapshot": asdict(candidate.snapshot),
             "score": candidate.score,
+            "risk_score": candidate.risk_score,
             "verdict": candidate.verdict.value,
         }
         if ai_brief is not None:
@@ -322,6 +323,7 @@ def lookup(
     table.add_row("Net debt / EBITDA", f"{snap.net_debt_to_ebitda:.2f}x")
     table.add_row("FCF yield", f"{snap.fcf_yield_pct:.1f}%")
     table.add_row("Score", str(candidate.score))
+    table.add_row("Risk", str(candidate.risk_score))
     table.add_row("Verdict", candidate.verdict.value)
     console.print(table)
 
@@ -462,6 +464,7 @@ def _result_to_dict(result: Any) -> dict[str, Any]:
                 "instrument": asdict(c.instrument),
                 "snapshot": asdict(c.snapshot),
                 "score": c.score,
+                "risk_score": c.risk_score,
                 "verdict": c.verdict.value,
             }
             for c in result.candidates

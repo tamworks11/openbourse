@@ -54,8 +54,10 @@ candidates list re-runs in place.
   implementations without touching call sites.
 - **Editable filters** — toggle each criterion on or off and tweak
   thresholds from inside the TUI (`f` key). Verdict-level filtering too.
-- **Transparent scoring** — composite score and verdict thresholds are pure
-  functions in `openbourse.screening.scoring`, fully unit-tested.
+- **Transparent scoring** — composite quality score, parallel risk score
+  (0–100, higher = riskier), and verdict thresholds are pure functions in
+  `openbourse.screening`, fully unit-tested. Filter by `max_risk_score`
+  the same way you filter by leverage or market cap.
 - **Universe ingest** — `bourse universe ingest --source sp500` (or
   `russell2000`, `nasdaq100`, etc.) builds your screening universe from
   Wikipedia + iShares ETF holdings.
@@ -190,6 +192,71 @@ Inside the TUI press `/` (or `:`) to open the command bar — same pipeline,
 just keyboard-driven (`:lookup INTC`, `:screen all`, `:brief CDNS`, etc.).
 
 All commands respect the `OPENBOURSE_*` environment variables in `.env`.
+
+## Risk score
+
+Every candidate carries two parallel numbers: a **composite quality score**
+(higher = better business) and a **risk score** (higher = more vulnerable).
+A name with quality 92 / risk 18 is qualitatively different from quality 92 /
+risk 68 — both look great by the headline number, but the second one is a
+small or levered company where one missed quarter can erase the position.
+The screener shows both side by side so you can tell them apart.
+
+The risk score is a weighted average of four normalized signals, each
+mapped to 0–1 and combined into a 0–100 integer. The formula lives in
+`src/openbourse/screening/risk.py` and is fully unit-tested.
+
+| Component | Weight | What it captures | Anchors (0 → 1) |
+|---|---|---|---|
+| Leverage | **35%** | Debt-driven failure risk | net debt/EBITDA: 0x → 5x+ |
+| Size | **25%** | Small-cap volatility, illiquidity, less analyst scrutiny | market cap: $100B → $1B (log scale) |
+| Margin | **20%** | Pricing-power / commoditization risk | gross margin: 100% → 0% |
+| FCF yield | **20%** | Cash-cushion / fundability risk | FCF yield: 8%+ → 0% |
+
+Leverage carries the most weight because it's the most direct path to
+permanent loss. Size is second — it bundles liquidity, governance, and
+diversification into one metric. Margin and FCF yield are correlated, so
+they share the remaining 40%.
+
+**Bands** (loose categorical buckets, not hard thresholds — for at-a-glance
+reading, like the verdict bands on the composite score):
+
+```
+0 ────────── 30 ────────── 60 ────────── 100
+   low risk     moderate       high risk
+```
+
+- **0–30 (low):** large-cap, undebted, high-margin, real FCF.
+- **30–60 (moderate):** typical compounder territory — most names land here.
+- **60–100 (high):** at least one component is in the danger zone.
+
+**Worked example.** Cadence Design Systems (CDNS) — $78B market cap, 89%
+gross margin, 0.2x net debt/EBITDA, 2.8% FCF yield:
+
+```
+Leverage: 0.2 / 5.0       = 0.04
+Size:     log10(78B)→0.05 = 0.05
+Margin:   1 - 89/100      = 0.109
+FCF yld:  1 - 2.8/8       = 0.65
+
+Risk = 0.35×0.04 + 0.25×0.05 + 0.20×0.109 + 0.20×0.65 = 0.178
+     × 100 ≈ 18  (low risk)
+```
+
+The mediocre FCF yield doesn't flip the verdict because the other three
+signals are excellent — exactly the design intent. To bias the score
+toward your own concerns (e.g. debt-paranoid), pass a custom
+`RiskWeights(leverage=0.5, size=0.2, margin=0.15, fcf_yield=0.15)` to
+`compute_risk_score`. The default lives in `RiskWeights()`.
+
+To filter the screener by risk tolerance, press `f` and toggle
+**Risk score ≤ N**. Candidates above the ceiling are dropped before
+scoring, so the filter is cheap. The composite score, fit %, risk score,
+and verdict all show together in the detail pane:
+
+```
+Score 71   Risk 42   Fit 84%   Verdict PASS
+```
 
 ## Project layout
 

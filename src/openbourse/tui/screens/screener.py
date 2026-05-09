@@ -65,8 +65,33 @@ COLUMNS = (
     "GM",
     "FCF YLD",
     "SCORE",
+    "RISK",
     "VERDICT",
 )
+
+
+# Band thresholds match the bands documented in README.md and brief.svg:
+# 0-30 low (green), 30-60 moderate (yellow), 60-100 high (red).
+def _risk_glyph_color(risk_score: int) -> str:
+    """Return the Rich colour name for the band ``risk_score`` falls into."""
+    if risk_score <= 30:
+        return "green"
+    if risk_score < 60:
+        return "yellow"
+    return "red"
+
+
+def _risk_cell(risk_score: int) -> Text:
+    """Build a coloured-glyph + number cell for the candidates table.
+
+    ● glyph picks a green / yellow / red tint based on the risk band so
+    the user can scan the column at a glance without reading the digits.
+    """
+    color = _risk_glyph_color(risk_score)
+    cell = Text()
+    cell.append("● ", style=color)
+    cell.append(f"{risk_score:>3}")
+    return cell
 
 
 def _format_market_cap(cap_usd: float) -> str:
@@ -232,6 +257,7 @@ class ScreenerScreen(Screen[None]):
             _format_pct(snap.gross_margin_pct),
             _format_pct(snap.fcf_yield_pct),
             str(candidate.score),
+            _risk_cell(candidate.risk_score),
             verdict_text,
         )
 
@@ -262,7 +288,10 @@ class ScreenerScreen(Screen[None]):
             f"Net debt/EBITDA {snap.net_debt_to_ebitda:>11.2f}x\n"
             f"FCF yield       {_format_pct(snap.fcf_yield_pct):>12}\n"
             f"\n"
-            f"Score [b]{c.score:>3}[/b]   Fit [b]{fit_pct:>3.0f}%[/b]   "
+            f"Score [b]{c.score:>3}[/b]   "
+            f"Risk [b {_risk_glyph_color(c.risk_score)}]"
+            f"{c.risk_score:>3}[/b {_risk_glyph_color(c.risk_score)}]   "
+            f"Fit [b]{fit_pct:>3.0f}%[/b]   "
             f"Verdict [{verdict_style}]{c.verdict.value}[/{verdict_style}]"
         )
         if c.instrument.business_summary:

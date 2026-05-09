@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from openbourse.db.repositories import FundamentalsRepository, InstrumentRepository
 from openbourse.domain import Candidate, FundamentalsSnapshot, Instrument
 from openbourse.providers.base import Providers
+from openbourse.screening.risk import compute_risk_score
 from openbourse.screening.scoring import Weights, composite_score, verdict_for
 
 
@@ -67,6 +68,7 @@ async def lookup_candidate(
         snapshot=snapshot,
         score=score,
         verdict=verdict_for(score),
+        risk_score=compute_risk_score(snapshot),
     )
 
 

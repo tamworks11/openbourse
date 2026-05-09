@@ -105,3 +105,12 @@ def test_disabling_individual_filters_relaxes_only_that_one(
         min_fcf_yield_pct=None,
     )
     assert passes_screen(low_quality_snapshot, almost_all_off)
+
+
+def test_format_active_filters_renders_max_risk() -> None:
+    """The risk-tolerance threshold should appear in the filter line when set."""
+    from openbourse.domain import ScreenDefinition
+    from openbourse.screening.criteria import format_active_filters
+
+    screen = ScreenDefinition(name="x", description="", max_risk_score=40)
+    assert "risk ≤40" in format_active_filters(screen)

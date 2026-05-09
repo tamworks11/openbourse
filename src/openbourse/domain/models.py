@@ -79,18 +79,30 @@ class ScreenDefinition:
     max_net_debt_to_ebitda: float | None = None
     min_market_cap_usd: float | None = None
     min_fcf_yield_pct: float | None = None
+    # Risk-tolerance ceiling. Candidates with computed risk_score above
+    # this value are filtered out. ``None`` disables the filter entirely.
+    # Bands: ≤30 low risk, 30-60 moderate, ≥60 high.
+    max_risk_score: int | None = None
     sectors: frozenset[str] | None = None
     verdicts: frozenset[Verdict] | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class Candidate:
-    """An instrument that passed a screen, with its score and verdict."""
+    """An instrument that passed a screen, with its score, risk, and verdict.
+
+    ``score`` is the composite quality score (0-100, higher better);
+    ``risk_score`` is the parallel vulnerability score (0-100, higher
+    riskier). Both are computed by the screening service from the
+    snapshot. They are independent — a high-quality business can still
+    register meaningful risk (e.g., small market cap).
+    """
 
     instrument: Instrument
     snapshot: FundamentalsSnapshot
     score: int
     verdict: Verdict
+    risk_score: int = 0
 
 
 @dataclass(frozen=True, slots=True)

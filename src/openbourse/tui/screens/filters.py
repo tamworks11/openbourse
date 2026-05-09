@@ -188,6 +188,18 @@ class FilterEditorScreen(ModalScreen[ScreenDefinition | None]):
             default=0.0,
             unit="%",
         )
+        # Risk-tolerance ceiling. The displayed default of 60 is the band
+        # transition between moderate and high risk — a sensible starting
+        # point for "filter out the riskiest candidates without being
+        # ultra-conservative".
+        yield self._row(
+            "risk",
+            "Risk score",
+            "≤",
+            float(s.max_risk_score) if s.max_risk_score is not None else None,
+            default=60.0,
+            unit="",
+        )
         # One Switch + Label per verdict, stacked top-down (best → worst) so
         # disabling REJECT (a common move) is the bottom toggle and the
         # alignment with the criterion rows stays consistent.
@@ -277,6 +289,7 @@ class FilterEditorScreen(ModalScreen[ScreenDefinition | None]):
 
     def _build_screen(self) -> ScreenDefinition:
         """Read every Switch + Input and produce a new ScreenDefinition."""
+        risk = self._read_field("risk")
         return replace(
             self._screen,
             min_revenue_growth_pct=self._read_field("rev-growth"),
@@ -284,6 +297,9 @@ class FilterEditorScreen(ModalScreen[ScreenDefinition | None]):
             max_net_debt_to_ebitda=self._read_field("net-debt"),
             min_market_cap_usd=self._read_field("mkt-cap", multiplier=1e9),
             min_fcf_yield_pct=self._read_field("fcf-yield"),
+            # Risk score is integer-typed in the domain model; round here
+            # rather than push float-handling into the screening service.
+            max_risk_score=round(risk) if risk is not None else None,
             sectors=self._read_sector_filter(),
             verdicts=self._read_verdict_filter(),
         )

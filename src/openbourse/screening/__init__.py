@@ -12,6 +12,7 @@ from openbourse.screening.lookup import (
     lookup_candidate,
     lookup_with_history,
 )
+from openbourse.screening.risk import RISK_MAX, RiskWeights, compute_risk_score
 from openbourse.screening.scoring import (
     SCORE_MAX,
     VERDICT_THRESHOLDS,
@@ -24,12 +25,15 @@ from openbourse.screening.service import ScreeningService
 __all__ = [
     "BUILTIN_SCREENS",
     "DEFAULT_CONCERNS",
+    "RISK_MAX",
     "SCORE_MAX",
     "VERDICT_THRESHOLDS",
+    "RiskWeights",
     "ScreeningService",
     "TickerLookupError",
     "Weights",
     "composite_score",
+    "compute_risk_score",
     "compute_style_fit",
     "format_active_filters",
     "lookup_candidate",

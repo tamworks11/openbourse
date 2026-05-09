@@ -13,6 +13,7 @@ from openbourse.domain import (
     ScreenResult,
 )
 from openbourse.screening.criteria import passes_screen
+from openbourse.screening.risk import compute_risk_score
 from openbourse.screening.scoring import Weights, composite_score, verdict_for
 
 
@@ -52,6 +53,12 @@ class ScreeningService:
                 continue
             if not passes_screen(snapshot, screen):
                 continue
+            risk = compute_risk_score(snapshot)
+            # Risk-tolerance ceiling — applied after risk is computed but
+            # before scoring so we don't pay for composite_score() on rows
+            # the user already excluded for being too risky.
+            if screen.max_risk_score is not None and risk > screen.max_risk_score:
+                continue
             score = composite_score(snapshot, weights=self._weights)
             verdict = verdict_for(score)
             if screen.verdicts is not None and verdict not in screen.verdicts:
@@ -62,6 +69,7 @@ class ScreeningService:
                     snapshot=snapshot,
                     score=score,
                     verdict=verdict,
+                    risk_score=risk,
                 )
             )
         candidates.sort(key=lambda c: (-c.score, c.instrument.ticker))
