@@ -76,12 +76,7 @@ class TestExtractRiskFactors:
 
     def test_handles_cybersecurity_end_marker(self) -> None:
         # Post-2023 filers sometimes use Item 1C for Cybersecurity.
-        text = (
-            "Item 1A. Risk Factors\n"
-            "Risk content.\n"
-            "Item 1C. Cybersecurity\n"
-            "Cyber stuff."
-        )
+        text = "Item 1A. Risk Factors\nRisk content.\nItem 1C. Cybersecurity\nCyber stuff."
         section = extract_risk_factors(text)
         assert "Risk content" in section
         assert "Cyber stuff" not in section

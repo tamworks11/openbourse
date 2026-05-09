@@ -44,9 +44,7 @@ class TestBuildFindings:
                 "quote": "top 3 customers represent 38% of revenue",
             },
         }
-        findings = _build_findings(
-            parsed, ["Customer concentration"], filing_text=filing
-        )
+        findings = _build_findings(parsed, ["Customer concentration"], filing_text=filing)
         assert findings[0].status == "flagged"
         # Quote was a real substring; should be preserved.
         assert "38%" in findings[0].note
@@ -78,9 +76,7 @@ class TestBuildFindings:
         assert findings[0].note != ""
 
     def test_missing_concern_defaults_to_unknown(self) -> None:
-        findings = _build_findings(
-            {}, ["Concern A"], filing_text="any text"
-        )
+        findings = _build_findings({}, ["Concern A"], filing_text="any text")
         assert findings[0].status == "unknown"
         assert findings[0].note == ""
 

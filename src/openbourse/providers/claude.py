@@ -269,7 +269,9 @@ class StubBriefProvider:
         # Stub returns "unknown" for every requested concern — honest about
         # the fact that it isn't actually scanning anything.
         findings = tuple(
-            ConcernFinding(concern=c, status="unknown", note="stub provider — no analysis performed")
+            ConcernFinding(
+                concern=c, status="unknown", note="stub provider — no analysis performed"
+            )
             for c in active_concerns
         )
 

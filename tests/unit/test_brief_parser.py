@@ -71,9 +71,7 @@ class TestBuildBrief:
         parsed = {
             "concerns": {"Made up concern": {"status": "wibble", "note": "x"}},
         }
-        brief = _build_brief(
-            "TST", "m", parsed, requested_concerns=["Made up concern"], raw={}
-        )
+        brief = _build_brief("TST", "m", parsed, requested_concerns=["Made up concern"], raw={})
         assert brief.concerns[0].status == "unknown"
 
     def test_empty_response_yields_empty_sections(self) -> None:

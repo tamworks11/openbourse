@@ -33,49 +33,35 @@ class TestStyleFitWithNoCriteria:
 
 class TestStyleFitWithMinThresholds:
     def test_value_at_threshold_scores_50(self) -> None:
-        screen = ScreenDefinition(
-            name="growth", description="", min_revenue_growth_pct=15.0
-        )
+        screen = ScreenDefinition(name="growth", description="", min_revenue_growth_pct=15.0)
         assert compute_style_fit(_snap(revenue_growth_pct=15.0), screen) == pytest.approx(50.0)
 
     def test_value_well_above_threshold_scores_100(self) -> None:
-        screen = ScreenDefinition(
-            name="growth", description="", min_revenue_growth_pct=15.0
-        )
+        screen = ScreenDefinition(name="growth", description="", min_revenue_growth_pct=15.0)
         # 30% maps to soft_ceiling.
         assert compute_style_fit(_snap(revenue_growth_pct=30.0), screen) == pytest.approx(100.0)
 
     def test_value_below_threshold_scores_under_50(self) -> None:
-        screen = ScreenDefinition(
-            name="growth", description="", min_revenue_growth_pct=15.0
-        )
+        screen = ScreenDefinition(name="growth", description="", min_revenue_growth_pct=15.0)
         score = compute_style_fit(_snap(revenue_growth_pct=7.5), screen)
         assert score == pytest.approx(25.0)  # halfway between 0 and 50
 
     def test_zero_value_scores_zero(self) -> None:
-        screen = ScreenDefinition(
-            name="growth", description="", min_revenue_growth_pct=15.0
-        )
+        screen = ScreenDefinition(name="growth", description="", min_revenue_growth_pct=15.0)
         assert compute_style_fit(_snap(revenue_growth_pct=0.0), screen) == 0.0
 
 
 class TestStyleFitWithMaxThreshold:
     def test_zero_leverage_scores_100(self) -> None:
-        screen = ScreenDefinition(
-            name="leverage", description="", max_net_debt_to_ebitda=2.0
-        )
+        screen = ScreenDefinition(name="leverage", description="", max_net_debt_to_ebitda=2.0)
         assert compute_style_fit(_snap(net_debt_to_ebitda=0.0), screen) == 100.0
 
     def test_at_threshold_scores_50(self) -> None:
-        screen = ScreenDefinition(
-            name="leverage", description="", max_net_debt_to_ebitda=2.0
-        )
+        screen = ScreenDefinition(name="leverage", description="", max_net_debt_to_ebitda=2.0)
         assert compute_style_fit(_snap(net_debt_to_ebitda=2.0), screen) == pytest.approx(50.0)
 
     def test_well_above_threshold_scores_zero(self) -> None:
-        screen = ScreenDefinition(
-            name="leverage", description="", max_net_debt_to_ebitda=2.0
-        )
+        screen = ScreenDefinition(name="leverage", description="", max_net_debt_to_ebitda=2.0)
         # 4x debt is at 2x threshold = soft_ceiling -> 0.
         assert compute_style_fit(_snap(net_debt_to_ebitda=4.0), screen) == 0.0
 
@@ -100,7 +86,5 @@ class TestStyleFitAcrossMultipleCriteria:
             min_gross_margin_pct=40.0,
             max_net_debt_to_ebitda=1.0,
         )
-        snap = _snap(
-            revenue_growth_pct=40.0, gross_margin_pct=90.0, net_debt_to_ebitda=0.0
-        )
+        snap = _snap(revenue_growth_pct=40.0, gross_margin_pct=90.0, net_debt_to_ebitda=0.0)
         assert compute_style_fit(snap, screen) == pytest.approx(100.0)

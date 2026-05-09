@@ -428,9 +428,7 @@ def screen_run(
     console.print(table)
 
 
-def _print_brief_section(
-    title: str, items: tuple[str, ...] | list[str], *, color: str
-) -> None:
+def _print_brief_section(title: str, items: tuple[str, ...] | list[str], *, color: str) -> None:
     """Print one of the brief's coloured bullet sections; skip when empty."""
     if not items:
         return

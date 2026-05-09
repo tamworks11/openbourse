@@ -117,9 +117,7 @@ class TestComputeRiskScore:
         )
         assert compute_risk_score(snap) >= 95
 
-    def test_custom_weights_change_score(
-        self, sample_snapshot: FundamentalsSnapshot
-    ) -> None:
+    def test_custom_weights_change_score(self, sample_snapshot: FundamentalsSnapshot) -> None:
         # Heavy weight on size shifts CDNS (mid-cap) higher than the default.
         size_heavy = RiskWeights(leverage=0.1, size=0.7, margin=0.1, fcf_yield=0.1)
         balanced = compute_risk_score(sample_snapshot)

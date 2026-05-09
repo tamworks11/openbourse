@@ -101,9 +101,7 @@ class ClaudeConcernScanner:
             # Without filing text, we genuinely don't know — return
             # unknowns instead of paying for an empty scan.
             return [
-                ConcernFinding(
-                    concern=c, status="unknown", note="no filing text available"
-                )
+                ConcernFinding(concern=c, status="unknown", note="no filing text available")
                 for c in concerns
             ]
 
@@ -172,9 +170,7 @@ def _build_findings(
     for concern in concerns:
         entry = parsed.get(concern) if isinstance(parsed, dict) else None
         if not isinstance(entry, dict):
-            findings.append(
-                ConcernFinding(concern=concern, status="unknown", note="")
-            )
+            findings.append(ConcernFinding(concern=concern, status="unknown", note=""))
             continue
         status = str(entry.get("status") or "unknown").lower()
         if status not in {"flagged", "clear", "unknown"}:

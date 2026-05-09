@@ -168,9 +168,7 @@ class ConcernScanRow(Base):
 
     __tablename__ = "concern_scans"
     __table_args__ = (
-        UniqueConstraint(
-            "accession_number", "concerns_hash", name="uq_concern_scans_key"
-        ),
+        UniqueConstraint("accession_number", "concerns_hash", name="uq_concern_scans_key"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

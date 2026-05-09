@@ -27,9 +27,7 @@ class TestHashConcerns:
 class TestConcernScanRepository:
     async def test_returns_none_when_uncached(self, db_session: AsyncSession) -> None:
         repo = ConcernScanRepository(db_session)
-        assert (
-            await repo.get(accession_number="0001-23-456789", concerns=["A"]) is None
-        )
+        assert await repo.get(accession_number="0001-23-456789", concerns=["A"]) is None
 
     async def test_save_and_retrieve_roundtrip(self, db_session: AsyncSession) -> None:
         repo = ConcernScanRepository(db_session)
@@ -45,18 +43,14 @@ class TestConcernScanRepository:
         )
         await db_session.flush()
 
-        cached = await repo.get(
-            accession_number="0001-23-456789", concerns=["B", "A"]
-        )
+        cached = await repo.get(accession_number="0001-23-456789", concerns=["B", "A"])
         assert cached is not None
         assert {f.concern for f in cached} == {"A", "B"}
         flagged = next(f for f in cached if f.concern == "A")
         assert flagged.status == "flagged"
         assert flagged.note == "quote"
 
-    async def test_different_concern_set_misses_cache(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_different_concern_set_misses_cache(self, db_session: AsyncSession) -> None:
         repo = ConcernScanRepository(db_session)
         await repo.save(
             accession_number="0001-23-456789",
@@ -66,16 +60,9 @@ class TestConcernScanRepository:
         )
         await db_session.flush()
         # Different concern list — should miss.
-        assert (
-            await repo.get(
-                accession_number="0001-23-456789", concerns=["A", "B"]
-            )
-            is None
-        )
+        assert await repo.get(accession_number="0001-23-456789", concerns=["A", "B"]) is None
 
-    async def test_save_replaces_existing_entry(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_save_replaces_existing_entry(self, db_session: AsyncSession) -> None:
         repo = ConcernScanRepository(db_session)
         await repo.save(
             accession_number="0001-23-456789",
