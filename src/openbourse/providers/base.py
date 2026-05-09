@@ -48,6 +48,15 @@ class FundamentalsProvider(Protocol):
         """
         ...
 
+    async def metadata(self, ticker: str) -> Instrument:
+        """Return identity metadata (name, sector, exchange, CIK) for ``ticker``.
+
+        Used by the universe ingest pipeline so the ``instruments`` table
+        stores proper company names rather than just the ticker. Should
+        raise :class:`KeyError` when the ticker is unknown to this provider.
+        """
+        ...
+
 
 @runtime_checkable
 class FilingsProvider(Protocol):

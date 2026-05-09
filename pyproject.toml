@@ -38,6 +38,7 @@ dependencies = [
     "rich>=13.7,<15.0",
     "plotext>=5.2,<6.0",
     "yfinance>=0.2.40,<1.0",
+    "lxml>=5.0,<7.0",
 ]
 
 [project.optional-dependencies]
@@ -71,6 +72,7 @@ include = [
     { path = "alembic", format = ["sdist", "wheel"] },
     { path = "alembic.ini", format = ["sdist", "wheel"] },
     { path = "src/openbourse/data/seed.json", format = ["sdist", "wheel"] },
+    { path = "src/openbourse/data/lists/*.txt", format = ["sdist", "wheel"] },
 ]
 
 [tool.poetry.requires-plugins]

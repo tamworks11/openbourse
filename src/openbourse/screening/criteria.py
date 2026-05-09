@@ -4,7 +4,26 @@ from __future__ import annotations
 
 from openbourse.domain import FundamentalsSnapshot, ScreenDefinition
 
+# A practically-infinite bound for the unfiltered "all" screen. Float values
+# rather than ``inf`` so they round-trip through JSON cleanly when persisted.
+_PERMISSIVE_LOWER = -1e15
+_PERMISSIVE_UPPER = 1e15
+
+
 BUILTIN_SCREENS: dict[str, ScreenDefinition] = {
+    "all": ScreenDefinition(
+        name="all",
+        description=(
+            "All instruments — no filters; sorts the entire ingested universe by "
+            "composite score. Use this to browse small caps, deteriorating names, "
+            "and outliers that other screens hide."
+        ),
+        min_revenue_growth_pct=_PERMISSIVE_LOWER,
+        min_gross_margin_pct=_PERMISSIVE_LOWER,
+        max_net_debt_to_ebitda=_PERMISSIVE_UPPER,
+        min_market_cap_usd=0.0,
+        min_fcf_yield_pct=_PERMISSIVE_LOWER,
+    ),
     "quality_compounders": ScreenDefinition(
         name="quality_compounders",
         description=(

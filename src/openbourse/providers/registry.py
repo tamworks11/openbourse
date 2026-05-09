@@ -71,17 +71,22 @@ def _build_fundamentals(settings: Settings) -> tuple[FundamentalsProvider, str]:
     """
     choice = (settings.fundamentals_provider or "yfinance").lower()
 
+    provider: FundamentalsProvider
     if choice == "stub":
-        return StubFundamentalsProvider(), "stub"
+        provider = StubFundamentalsProvider()
+        return provider, "stub"
 
     if choice == "fmp":
         fmp_key = settings.fmp_api_key.get_secret_value() if settings.fmp_api_key else ""
         if fmp_key:
-            return FmpFundamentalsProvider(fmp_key), "fmp"
-        return StubFundamentalsProvider(), "stub"
+            provider = FmpFundamentalsProvider(fmp_key)
+            return provider, "fmp"
+        provider = StubFundamentalsProvider()
+        return provider, "stub"
 
     # Default: yfinance. No credentials required.
-    return YfinanceFundamentalsProvider(), "yfinance"
+    provider = YfinanceFundamentalsProvider()
+    return provider, "yfinance"
 
 
 def _build_filings(settings: Settings) -> tuple[FilingsProvider, str]:

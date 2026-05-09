@@ -35,7 +35,7 @@ from typing import Any
 import pandas as pd  # type: ignore[import-untyped]
 import yfinance as yf  # type: ignore[import-untyped]
 
-from openbourse.domain import FundamentalsSnapshot
+from openbourse.domain import FundamentalsSnapshot, Instrument
 
 HISTORY_LOOKBACK_PAD = 1  # annual period → YoY needs 1 prior year
 
@@ -57,6 +57,21 @@ class YfinanceFundamentalsProvider:
                 f"invalid, delisted, or temporarily blocked"
             )
         return _parse_info(ticker, info)
+
+    async def metadata(self, ticker: str) -> Instrument:
+        """Pull identity metadata (name, sector, exchange, summary) from Yahoo."""
+        ticker = ticker.upper()
+        info = await asyncio.to_thread(_get_info, ticker)
+        if not info:
+            raise KeyError(f"Yahoo Finance returned no metadata for {ticker}")
+        return Instrument(
+            ticker=ticker,
+            name=str(info.get("longName") or info.get("shortName") or ticker),
+            sector=info.get("sector"),
+            exchange=info.get("exchange"),
+            cik=info.get("cik"),
+            business_summary=info.get("longBusinessSummary") or info.get("description"),
+        )
 
     async def history(self, ticker: str, *, limit: int = 4) -> list[FundamentalsSnapshot]:
         """Return up to ``limit`` annual snapshots computed from Yahoo statements.

@@ -46,10 +46,16 @@ class BourseApp(App[None]):
         )
 
     def action_help(self) -> None:
-        """Surface a one-line keybinding cheat sheet via Textual's notify popup."""
+        """Surface a one-line keybinding cheat sheet via Textual's notify popup.
+
+        ``notify`` runs the message through Rich markup, so any literal ``[``
+        or ``]`` inside the text needs escaping with a leading backslash —
+        otherwise ``[/]`` is read as a closing-tag and the renderer crashes.
+        """
         self.notify(
-            "Keys: ↑↓ navigate · enter view brief · f filter · s sort · "
-            "e export · w watchlist · q quit",
-            title="openbourse help",
-            timeout=8,
+            r"Keys: ↑↓ row · pgUp/pgDn page · g/G top/bottom · "
+            r"\[ / \] ±25 · { / } ±100 · "
+            r"↵ brief · / command · d download · q quit",
+            title="openbourse keys",
+            timeout=10,
         )

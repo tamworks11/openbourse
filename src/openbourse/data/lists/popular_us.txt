@@ -1,0 +1,113 @@
+# popular_us.txt — ~80 well-known US-listed tickers, mixed sectors.
+#
+# This is a starter list, not the S&P 500. Run `bourse universe ingest` to
+# populate fundamentals for these names; supply your own list with --from
+# for a different universe.
+#
+# Format: one ticker per line, # for comments, blank lines OK.
+# Tickers are uppercased and de-duplicated by the loader.
+
+# --- Mega-cap tech ---
+AAPL    # Apple
+MSFT    # Microsoft
+GOOG    # Alphabet (Class C)
+GOOGL   # Alphabet (Class A)
+AMZN    # Amazon
+META    # Meta Platforms
+NVDA    # NVIDIA
+TSLA    # Tesla
+AVGO    # Broadcom
+ORCL    # Oracle
+
+# --- Software & internet ---
+CRM     # Salesforce
+ADBE    # Adobe
+NOW     # ServiceNow
+INTU    # Intuit
+WDAY    # Workday
+TEAM    # Atlassian
+ADSK    # Autodesk
+CDNS    # Cadence Design Systems
+SNPS    # Synopsys
+NET     # Cloudflare
+DDOG    # Datadog
+SNOW    # Snowflake
+ZS      # Zscaler
+CRWD    # CrowdStrike
+PANW    # Palo Alto Networks
+NFLX    # Netflix
+
+# --- Semis / hardware ---
+AMD     # Advanced Micro Devices
+INTC    # Intel
+QCOM    # Qualcomm
+AMAT    # Applied Materials
+LRCX    # Lam Research
+KLAC    # KLA
+MU      # Micron
+ANET    # Arista Networks
+CSCO    # Cisco
+
+# --- Quality compounders / data ---
+FICO    # Fair Isaac
+MSCI    # MSCI
+VEEV    # Veeva Systems
+PAYC    # Paycom
+TYL     # Tyler Technologies
+
+# --- Financials ---
+JPM     # JPMorgan Chase
+BAC     # Bank of America
+WFC     # Wells Fargo
+GS      # Goldman Sachs
+MS      # Morgan Stanley
+BLK     # BlackRock
+V       # Visa
+MA      # Mastercard
+AXP     # American Express
+SCHW    # Charles Schwab
+
+# --- Consumer staples & retail ---
+WMT     # Walmart
+COST    # Costco
+KO      # Coca-Cola
+PEP     # PepsiCo
+PG      # Procter & Gamble
+MCD     # McDonald's
+
+# --- Consumer discretionary ---
+HD      # Home Depot
+LOW     # Lowe's
+NKE     # Nike
+SBUX    # Starbucks
+DIS     # Disney
+TGT     # Target
+
+# --- Healthcare ---
+UNH     # UnitedHealth
+JNJ     # Johnson & Johnson
+LLY     # Eli Lilly
+MRK     # Merck
+ABBV    # AbbVie
+PFE     # Pfizer
+TMO     # Thermo Fisher Scientific
+DHR     # Danaher
+ABT     # Abbott
+ISRG    # Intuitive Surgical
+
+# --- Industrials & energy ---
+CAT     # Caterpillar
+HON     # Honeywell
+GE      # GE Aerospace
+RTX     # RTX (Raytheon)
+DE      # Deere
+XOM     # Exxon Mobil
+CVX     # Chevron
+
+# --- Auto / transport ---
+F       # Ford
+GM      # General Motors
+
+# --- Telecom ---
+VZ      # Verizon
+T       # AT&T

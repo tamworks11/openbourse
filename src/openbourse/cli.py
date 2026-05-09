@@ -42,8 +42,10 @@ app = typer.Typer(
 )
 db_app = typer.Typer(help="Database lifecycle commands.")
 screen_app = typer.Typer(help="Run and inspect screens without the TUI.")
+universe_app = typer.Typer(help="Build the screening universe by ingesting tickers.")
 app.add_typer(db_app, name="db")
 app.add_typer(screen_app, name="screen")
+app.add_typer(universe_app, name="universe")
 
 console = Console()
 
@@ -100,6 +102,163 @@ def screen_list() -> None:
     console.print(table)
 
 
+@universe_app.command("ingest")
+def universe_ingest(
+    source: str | None = typer.Option(
+        None,
+        "--source",
+        "-s",
+        help="Fetch a fresh list (sp500, nasdaq100, dow30) from Wikipedia.",
+    ),
+    list_name: str = typer.Option(
+        "popular_us",
+        "--list",
+        "-l",
+        help="Bundled list to ingest. Ignored when --source or --from is given.",
+    ),
+    from_path: Path | None = typer.Option(  # noqa: B008 - Typer pattern
+        None,
+        "--from",
+        "-f",
+        help="Path to a custom ticker list (one per line, # comments).",
+    ),
+    with_history: bool = typer.Option(
+        False,
+        "--with-history",
+        help="Also fetch annual history for each ticker (more API calls).",
+    ),
+    rate: float = typer.Option(
+        0.2,
+        "--rate",
+        help="Seconds to sleep between API calls. Yahoo throttles aggressive clients.",
+    ),
+    stale_after: int = typer.Option(
+        0,
+        "--stale-after",
+        help="Skip tickers with a snapshot newer than N days. 0 = always refetch.",
+    ),
+    limit: int | None = typer.Option(
+        None,
+        "--limit",
+        help="Stop after ingesting the first N tickers (useful for trial runs).",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print the ticker list and exit without making API calls.",
+    ),
+) -> None:
+    """Bulk-ingest fundamentals for a list of tickers into your database.
+
+    Defaults to the bundled ``popular_us`` list (~80 well-known US tickers).
+    Provide ``--from path/to/list.txt`` to ingest your own universe instead.
+    """
+    from openbourse.universe import (
+        DEFAULT_BUNDLED_LIST,
+        KNOWN_SOURCES,
+        fetch_source,
+        load_bundled_list,
+        load_tickers,
+    )
+
+    if from_path is not None:
+        tickers = load_tickers(from_path)
+        source_label = str(from_path)
+    elif source is not None:
+        if source not in KNOWN_SOURCES:
+            raise typer.BadParameter(
+                f"unknown source {source!r}; available: {sorted(KNOWN_SOURCES)}"
+            )
+        console.print(f"[dim]Fetching {source} constituents from Wikipedia…[/dim]")
+        tickers = fetch_source(source)
+        source_label = f"wikipedia:{source}"
+    else:
+        tickers = load_bundled_list(list_name or DEFAULT_BUNDLED_LIST)
+        source_label = f"bundled:{list_name}"
+
+    if limit is not None:
+        tickers = tickers[:limit]
+
+    if dry_run:
+        console.print(
+            f"[bold]Dry run[/bold] — would ingest {len(tickers)} tickers from {source_label}"
+        )
+        console.print(", ".join(tickers))
+        return
+
+    asyncio.run(
+        _run_universe_ingest(
+            tickers,
+            with_history=with_history,
+            rate_limit_seconds=rate,
+            stale_after_days=stale_after,
+            source_label=source_label,
+        )
+    )
+
+
+@universe_app.command("list")
+def universe_list(
+    list_name: str = typer.Argument(
+        "popular_us",
+        help="Bundled list to print (popular_us is the only one shipped today).",
+    ),
+) -> None:
+    """Print a bundled ticker list to stdout (useful for piping/debugging)."""
+    from openbourse.universe import load_bundled_list
+
+    for ticker in load_bundled_list(list_name):
+        console.print(ticker)
+
+
+@universe_app.command("fetch-list")
+def universe_fetch_list(
+    source: str = typer.Argument(
+        ...,
+        help="Source name: sp500, nasdaq100, dow30. See `bourse universe sources`.",
+    ),
+    output: Path | None = typer.Option(  # noqa: B008 - Typer pattern
+        None,
+        "--output",
+        "-o",
+        help="Write to a file instead of stdout (one ticker per line).",
+    ),
+) -> None:
+    """Pull a fresh constituent list from Wikipedia and emit it.
+
+    Examples:
+        bourse universe fetch-list sp500 -o sp500.txt
+        bourse universe fetch-list sp500 | wc -l
+
+    """
+    from openbourse.universe import KNOWN_SOURCES, fetch_source
+
+    if source not in KNOWN_SOURCES:
+        raise typer.BadParameter(f"unknown source {source!r}; available: {sorted(KNOWN_SOURCES)}")
+
+    tickers = fetch_source(source)
+    if output is not None:
+        output.write_text("\n".join(tickers) + "\n", encoding="utf-8")
+        console.print(f"[green]wrote[/green] {len(tickers)} tickers to {output}")
+    else:
+        for ticker in tickers:
+            console.print(ticker)
+
+
+@universe_app.command("sources")
+def universe_sources() -> None:
+    """List the external ticker-list sources we know how to fetch."""
+    from openbourse.universe import KNOWN_SOURCES
+
+    table = Table(title="Available --source values")
+    table.add_column("name", style="cyan")
+    table.add_column("label")
+    table.add_column("url")
+    for name, src in sorted(KNOWN_SOURCES.items()):
+        table.add_row(name, src.label, src.url)
+    console.print(table)
+
+
 @app.command()
 def lookup(
     ticker: str = typer.Argument(..., help="Stock ticker symbol, e.g. CDNS."),
@@ -144,6 +303,11 @@ def lookup(
     table = Table(title=f"{candidate.instrument.ticker} — {candidate.instrument.name}")
     table.add_column("metric", style="cyan")
     table.add_column("value", justify="right")
+    if candidate.instrument.sector or candidate.instrument.exchange:
+        table.add_row(
+            "Sector / Exchange",
+            f"{candidate.instrument.sector or '—'} · {candidate.instrument.exchange or '—'}",
+        )
     if snap.price_usd is not None:
         table.add_row("Price", f"${snap.price_usd:,.2f}")
     table.add_row("Market cap", f"${snap.market_cap_usd / 1e9:.1f}B")
@@ -154,6 +318,14 @@ def lookup(
     table.add_row("Score", str(candidate.score))
     table.add_row("Verdict", candidate.verdict.value)
     console.print(table)
+
+    if candidate.instrument.business_summary:
+        from openbourse.tui.screens.screener import _truncate_summary
+
+        console.print()
+        console.print(
+            f"[dim italic]{_truncate_summary(candidate.instrument.business_summary, max_chars=600)}[/dim italic]"
+        )
 
     if ai_brief is not None:
         console.print(f"\n[bold]Summary[/bold]\n{ai_brief.summary}")
@@ -412,6 +584,89 @@ async def _lookup(
         )
 
     return candidate, ai_brief, history_rows
+
+
+async def _run_universe_ingest(
+    tickers: list[str],
+    *,
+    with_history: bool,
+    rate_limit_seconds: float,
+    stale_after_days: int,
+    source_label: str,
+) -> None:
+    """Wire the providers + DB session to the universe ingest engine."""
+    from rich.progress import (
+        BarColumn,
+        MofNCompleteColumn,
+        Progress,
+        SpinnerColumn,
+        TextColumn,
+        TimeElapsedColumn,
+    )
+
+    from openbourse.universe import IngestSummary, ingest_tickers
+
+    settings = get_settings()
+    providers = build_providers(settings)
+    engine = create_engine_from_url(settings.database_url)
+    factory = get_session_factory(engine)
+
+    console.print(
+        f"[bold]Ingesting[/bold] {len(tickers)} tickers from {source_label} "
+        f"via [cyan]{providers.fundamentals_mode}[/cyan]"
+        f"{' [dim](with history)[/dim]' if with_history else ''}"
+    )
+
+    summary: IngestSummary
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            console=console,
+        ) as progress_bar:
+            task = progress_bar.add_task("Ingesting", total=len(tickers))
+
+            def _on_progress(ticker: str, index: int, total: int) -> None:
+                progress_bar.update(task, completed=index, description=f"Ingesting {ticker}")
+
+            summary = await ingest_tickers(
+                tickers,
+                providers,
+                factory,
+                with_history=with_history,
+                rate_limit_seconds=rate_limit_seconds,
+                stale_after_days=stale_after_days,
+                progress=_on_progress,
+            )
+            progress_bar.update(task, completed=len(tickers), description="Done")
+    finally:
+        await engine.dispose()
+
+    _report_ingest_summary(summary)
+
+
+def _report_ingest_summary(summary: Any) -> None:
+    """Print a Rich-formatted summary of an ingest run."""
+    console.print()
+    console.print(
+        f"[green]ingested[/green] {summary.ingested}  "
+        f"[yellow]skipped (fresh)[/yellow] {summary.skipped_fresh}  "
+        f"[red]failed[/red] {len(summary.failed)}  "
+        f"[dim]({summary.success_rate:.0%} success)[/dim]"
+    )
+    if summary.failed:
+        console.print()
+        fail_table = Table(title="Failed tickers", show_lines=False)
+        fail_table.add_column("ticker", style="red")
+        fail_table.add_column("reason")
+        for ticker, reason in summary.failed[:20]:  # cap output
+            fail_table.add_row(ticker, reason)
+        console.print(fail_table)
+        if len(summary.failed) > 20:
+            console.print(f"[dim]…and {len(summary.failed) - 20} more[/dim]")
 
 
 async def _seed() -> None:

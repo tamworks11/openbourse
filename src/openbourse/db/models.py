@@ -16,6 +16,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -37,6 +38,9 @@ class InstrumentRow(Base):
     sector: Mapped[str | None] = mapped_column(String(64))
     exchange: Mapped[str | None] = mapped_column(String(16))
     cik: Mapped[str | None] = mapped_column(String(16), index=True)
+    # Text (no length cap) — KKR's Yahoo description is >4 kB and at least
+    # one or two other large-cap names will be longer than any cap we pick.
+    business_summary: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

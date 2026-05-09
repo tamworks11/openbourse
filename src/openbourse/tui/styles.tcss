@@ -54,6 +54,12 @@ Screen {
     width: 1fr;
 }
 
+#detail-summary {
+    margin-top: 1;
+    color: $text-muted;
+    text-style: italic;
+}
+
 #section-heading {
     height: 1;
     background: $boost;

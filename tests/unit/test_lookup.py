@@ -55,13 +55,26 @@ async def test_lookup_uses_db_metadata_when_session_provided(
     assert candidate.instrument.cik == "0000813672"
 
 
-async def test_lookup_falls_back_to_minimal_instrument_when_db_empty(
+async def test_lookup_uses_provider_metadata_when_db_empty(
     db_session: AsyncSession, stub_providers: Providers
 ) -> None:
+    """When the DB has no row, lookup_candidate falls back to provider.metadata()."""
     candidate = await lookup_candidate("CDNS", stub_providers, session=db_session)
     assert candidate.instrument.ticker == "CDNS"
-    assert candidate.instrument.name == "CDNS"  # ticker echoed when DB has no row
-    assert candidate.instrument.cik is None
+    # Stub metadata pulls the real name from seed.json.
+    assert candidate.instrument.name == "Cadence Design Systems"
+    assert candidate.instrument.cik == "0000813672"
+
+
+async def test_lookup_falls_back_to_minimal_when_metadata_unknown(
+    stub_providers: Providers,
+) -> None:
+    """Tickers the provider doesn't know yield a ticker-only Instrument."""
+    # ZZZZ doesn't exist in the stub fixture; metadata() will raise KeyError
+    # internally, which lookup_candidate swallows. fetch() will then raise
+    # TickerLookupError as before.
+    with pytest.raises(TickerLookupError):
+        await lookup_candidate("ZZZZ", stub_providers)
 
 
 # --- lookup_with_history -----------------------------------------------------

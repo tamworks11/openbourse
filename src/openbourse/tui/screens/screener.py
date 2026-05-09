@@ -26,7 +26,7 @@ from typing import ClassVar
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.binding import BindingType
+from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Input, Static
@@ -92,17 +92,48 @@ def _format_price(price: float | None) -> str:
     return f"${price:,.2f}"
 
 
+def _truncate_summary(text: str, *, max_chars: int = 280) -> str:
+    """Trim a long business summary to ~``max_chars``, breaking on a sentence end.
+
+    Yahoo/FMP descriptions are typically 600 to 1500 characters — a full
+    paragraph. We want at most a couple of sentences in the detail pane so
+    it doesn't crowd out the metrics. Falls back to a hard truncate with
+    an ellipsis when no sentence boundary is available in the window.
+    """
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    window = text[:max_chars]
+    # Prefer the last complete sentence inside the window so the user sees
+    # a clean ending rather than a mid-word ellipsis. Only fall back to a
+    # hard truncate when the window contains no sentence boundary at all.
+    boundary = window.rfind(". ")
+    if boundary > 0:
+        return window[: boundary + 1]
+    return window.rstrip() + "…"
+
+
 class ScreenerScreen(Screen[None]):
     """Renders the screen definition, summary stats, candidate table, and detail pane."""
 
+    # Bindings shown in the footer are the discoverable subset; the others
+    # ([, ], {, }) are documented in `?` help and standard enough that
+    # vim users will reach for them automatically.
     BINDINGS: ClassVar[list[BindingType]] = [
-        ("enter", "view_brief", "View brief"),
-        ("colon", "focus_command", "Command"),
-        ("slash", "focus_command", "Command"),
-        ("f", "filter", "Filter"),
-        ("s", "sort", "Sort"),
-        ("e", "export", "Export"),
-        ("w", "watchlist", "Watchlist"),
+        Binding("enter", "view_brief", "View brief"),
+        Binding("colon", "focus_command", "Command"),
+        Binding("slash", "focus_command", "Command", show=False),
+        Binding("d", "download_history", "Download"),
+        Binding("g", "jump_top", "Top"),
+        Binding("G", "jump_bottom", "Bottom"),
+        Binding("[", "jump_back_25", "-25 rows", show=False),
+        Binding("]", "jump_forward_25", "+25 rows", show=False),
+        Binding("{", "jump_back_100", "-100 rows", show=False),
+        Binding("}", "jump_forward_100", "+100 rows", show=False),
+        Binding("f", "filter", "Filter"),
+        Binding("s", "sort", "Sort"),
+        Binding("e", "export", "Export"),
+        Binding("w", "watchlist", "Watchlist"),
     ]
 
     def __init__(
@@ -132,6 +163,7 @@ class ScreenerScreen(Screen[None]):
             ),
             Vertical(
                 Static("[dim](no row focused)[/dim]", id="detail-content"),
+                Static("", id="detail-summary"),
                 id="detail-pane",
             ),
             id="top-row",
@@ -197,16 +229,20 @@ class ScreenerScreen(Screen[None]):
     def _render_detail(self, row_index: int) -> None:
         """Repopulate the right-hand pane from the candidate at ``row_index``."""
         body = self.query_one("#detail-content", Static)
+        summary_widget = self.query_one("#detail-summary", Static)
         if self._result is None or not self._result.candidates:
             body.update("[dim](no candidates)[/dim]")
+            summary_widget.update("")
             return
         if row_index < 0 or row_index >= len(self._result.candidates):
             row_index = 0
         c = self._result.candidates[row_index]
         snap = c.snapshot
         verdict_style = VERDICT_STYLES[c.verdict]
+        # Position indicator — useful when the candidate list is thousands long.
+        position = f"[dim]{row_index + 1:,}/{len(self._result.candidates):,}[/dim]  "
         body.update(
-            f"[b cyan]{c.instrument.ticker}[/b cyan]  {c.instrument.name}\n"
+            f"{position}[b cyan]{c.instrument.ticker}[/b cyan]  {c.instrument.name}\n"
             f"[dim]{c.instrument.sector or '—'}  ·  {c.instrument.exchange or '—'}[/dim]\n"
             f"\n"
             f"Price           {_format_price(snap.price_usd):>12}\n"
@@ -219,6 +255,12 @@ class ScreenerScreen(Screen[None]):
             f"Score [b]{c.score:>3}[/b]   "
             f"Verdict [{verdict_style}]{c.verdict.value}[/{verdict_style}]"
         )
+        if c.instrument.business_summary:
+            summary_widget.update(_truncate_summary(c.instrument.business_summary))
+        else:
+            summary_widget.update(
+                "[dim]Press [b]d[/b] to download fundamentals + business description.[/dim]"
+            )
 
     # -- Events ------------------------------------------------------------
 
@@ -255,6 +297,47 @@ class ScreenerScreen(Screen[None]):
         """Move focus to the bottom command input."""
         self.query_one("#command-input", Input).focus()
 
+    # -- Fast-scroll actions ------------------------------------------------
+
+    def _move_cursor_to(self, row: int) -> None:
+        """Move the table cursor to ``row``, clamped to the candidates list."""
+        if self._result is None or not self._result.candidates:
+            return
+        clamped = max(0, min(row, len(self._result.candidates) - 1))
+        table = self.query_one("#candidates", DataTable)
+        table.move_cursor(row=clamped)
+
+    def _cursor_relative(self, delta: int) -> None:
+        """Move the cursor by ``delta`` rows (positive = down)."""
+        table = self.query_one("#candidates", DataTable)
+        current = table.cursor_row or 0
+        self._move_cursor_to(current + delta)
+
+    def action_jump_top(self) -> None:
+        """Jump to the first row."""
+        self._move_cursor_to(0)
+
+    def action_jump_bottom(self) -> None:
+        """Jump to the last row."""
+        if self._result is not None and self._result.candidates:
+            self._move_cursor_to(len(self._result.candidates) - 1)
+
+    def action_jump_back_25(self) -> None:
+        """Move the cursor up 25 rows."""
+        self._cursor_relative(-25)
+
+    def action_jump_forward_25(self) -> None:
+        """Move the cursor down 25 rows."""
+        self._cursor_relative(25)
+
+    def action_jump_back_100(self) -> None:
+        """Move the cursor up 100 rows — useful for thousand-row universes."""
+        self._cursor_relative(-100)
+
+    def action_jump_forward_100(self) -> None:
+        """Move the cursor down 100 rows — useful for thousand-row universes."""
+        self._cursor_relative(100)
+
     def action_view_brief(self) -> None:
         """Open the brief screen for the row currently under the cursor."""
         table = self.query_one("#candidates", DataTable)
@@ -276,6 +359,80 @@ class ScreenerScreen(Screen[None]):
                 providers=self._providers,
                 history=self._history.get(candidate.instrument.ticker, []),
             )
+        )
+
+    def action_download_history(self) -> None:
+        """Fetch + persist annual history for the row currently under the cursor.
+
+        Runs in a background worker so the UI stays responsive while yfinance
+        does its blocking work. The downloaded snapshots are persisted via
+        the standard ``lookup_with_history`` path so the next TUI launch
+        sees them in its startup query, and the in-memory ``_history``
+        cache is updated so re-opening the brief immediately shows charts.
+        """
+        if self._result is None or not self._result.candidates:
+            return
+        table = self.query_one("#candidates", DataTable)
+        if table.cursor_row is None:
+            return
+        candidate = self._result.candidates[table.cursor_row]
+        self.run_worker(
+            self._download_history_worker(candidate.instrument.ticker),
+            exclusive=False,
+            name=f"download-{candidate.instrument.ticker}",
+        )
+
+    async def _download_history_worker(self, ticker: str) -> None:
+        """Worker body for :meth:`action_download_history`."""
+        from openbourse.config import get_settings
+        from openbourse.db.engine import create_engine_from_url, get_session_factory
+        from openbourse.screening import TickerLookupError, lookup_with_history
+
+        self.app.notify(
+            f"Fetching history for {ticker}…",
+            title="History download",
+            timeout=2,
+        )
+        engine = create_engine_from_url(get_settings().database_url)
+        factory = get_session_factory(engine)
+        try:
+            async with factory() as session:
+                _candidate, history = await lookup_with_history(
+                    ticker, self._providers, session=session
+                )
+        except TickerLookupError as exc:
+            self.app.notify(
+                str(exc),
+                title="Download failed",
+                severity="error",
+                timeout=6,
+            )
+            return
+        except Exception as exc:  # surface any provider/db error to the user
+            self.app.notify(
+                f"{type(exc).__name__}: {exc}",
+                title="Download failed",
+                severity="error",
+                timeout=6,
+            )
+            return
+        finally:
+            await engine.dispose()
+
+        if not history:
+            self.app.notify(
+                f"{ticker} has no history available from the configured provider.",
+                title="No history",
+                severity="warning",
+                timeout=4,
+            )
+            return
+
+        self._history[ticker] = history
+        self.app.notify(
+            f"Saved {len(history)} history points for {ticker}. Open the brief to see charts.",
+            title="Download complete",
+            timeout=4,
         )
 
     def action_filter(self) -> None:

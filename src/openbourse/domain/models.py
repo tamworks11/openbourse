@@ -31,6 +31,7 @@ class Instrument:
     sector: str | None = None
     exchange: str | None = None
     cik: str | None = None  # SEC central index key, when available
+    business_summary: str | None = None  # 1-2 paragraph description of the business
 
 
 @dataclass(frozen=True, slots=True)

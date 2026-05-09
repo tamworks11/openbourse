@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx
 
-from openbourse.domain import FundamentalsSnapshot
+from openbourse.domain import FundamentalsSnapshot, Instrument
 
 FMP_BASE_URL = "https://financialmodelingprep.com/stable"
 # Free-tier FMP caps every statement endpoint at 5 rows total. We default to
@@ -103,6 +103,22 @@ class FmpFundamentalsProvider:
             )
 
         return _parse_current_fundamentals(ticker, profile, km_ttm, rt_ttm, income)
+
+    async def metadata(self, ticker: str) -> Instrument:
+        """Pull identity metadata + business description from FMP's ``/profile``."""
+        ticker = ticker.upper()
+        profile = await self._safe_get("/profile", symbol=ticker)
+        if not (isinstance(profile, list) and profile):
+            raise KeyError(f"FMP returned no profile for {ticker}")
+        row = profile[0]
+        return Instrument(
+            ticker=ticker,
+            name=str(row.get("companyName") or ticker),
+            sector=row.get("sector"),
+            exchange=row.get("exchange"),
+            cik=row.get("cik"),
+            business_summary=row.get("description"),
+        )
 
     async def history(
         self,
@@ -348,9 +364,11 @@ class StubFundamentalsProvider:
         self,
         fixture: dict[str, FundamentalsSnapshot] | None = None,
         history_fixture: dict[str, list[FundamentalsSnapshot]] | None = None,
+        metadata_fixture: dict[str, Instrument] | None = None,
     ) -> None:
         self._fixture = fixture or _load_default_fixture()
         self._history_fixture = history_fixture or _load_default_history_fixture()
+        self._metadata_fixture = metadata_fixture or _load_default_metadata_fixture()
 
     async def fetch(self, ticker: str) -> FundamentalsSnapshot:
         """Return the fixture snapshot for ``ticker`` or raise :class:`KeyError`."""
@@ -364,6 +382,14 @@ class StubFundamentalsProvider:
         """Return up to ``limit`` historical snapshots from the seed fixture."""
         snaps = self._history_fixture.get(ticker.upper(), [])
         return snaps[-limit:] if limit else list(snaps)
+
+    async def metadata(self, ticker: str) -> Instrument:
+        """Return seeded instrument metadata or raise :class:`KeyError`."""
+        ticker = ticker.upper()
+        try:
+            return self._metadata_fixture[ticker]
+        except KeyError as exc:
+            raise KeyError(f"unknown ticker: {ticker}") from exc
 
     @property
     def tickers(self) -> tuple[str, ...]:
@@ -398,3 +424,18 @@ def _load_default_history_fixture() -> dict[str, list[FundamentalsSnapshot]]:
     for snaps in history.values():
         snaps.sort(key=lambda s: s.as_of)
     return history
+
+
+def _load_default_metadata_fixture() -> dict[str, Instrument]:
+    """Per-ticker instrument metadata from the bundled seed."""
+    raw = json.loads(resources.files("openbourse.data").joinpath("seed.json").read_text())
+    out: dict[str, Instrument] = {}
+    for entry in raw["instruments"]:
+        out[entry["ticker"]] = Instrument(
+            ticker=entry["ticker"],
+            name=entry["name"],
+            sector=entry.get("sector"),
+            exchange=entry.get("exchange"),
+            cik=entry.get("cik"),
+        )
+    return out

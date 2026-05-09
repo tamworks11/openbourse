@@ -18,6 +18,7 @@ def _to_instrument(row: InstrumentRow) -> Instrument:
         sector=row.sector,
         exchange=row.exchange,
         cik=row.cik,
+        business_summary=row.business_summary,
     )
 
 
@@ -58,6 +59,7 @@ class InstrumentRepository:
                 sector=instrument.sector,
                 exchange=instrument.exchange,
                 cik=instrument.cik,
+                business_summary=instrument.business_summary,
             )
             self.session.add(existing)
             await self.session.flush()
@@ -66,6 +68,10 @@ class InstrumentRepository:
             existing.sector = instrument.sector
             existing.exchange = instrument.exchange
             existing.cik = instrument.cik
+            # Only overwrite an existing summary if a new one is provided —
+            # preserves descriptions across snapshot-only re-ingests.
+            if instrument.business_summary:
+                existing.business_summary = instrument.business_summary
         return existing
 
     async def get_by_ticker(self, ticker: str) -> Instrument | None:

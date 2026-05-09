@@ -43,7 +43,14 @@ async def lookup_candidate(
     if session is not None:
         instrument = await InstrumentRepository(session).get_by_ticker(ticker)
     if instrument is None:
-        instrument = Instrument(ticker=ticker, name=ticker)
+        # Try the provider's metadata() — gives us name/sector/exchange/cik
+        # plus the business description. Costs one extra API call but the
+        # alternative is presenting a ticker-only stub which is much worse
+        # UX. If the provider can't supply metadata, fall back to a stub.
+        try:
+            instrument = await providers.fundamentals.metadata(ticker)
+        except (KeyError, AttributeError, OSError):
+            instrument = Instrument(ticker=ticker, name=ticker)
 
     try:
         snapshot = await providers.fundamentals.fetch(ticker)
