@@ -561,6 +561,11 @@ def _seed_instruments_from_payload(payload: dict[str, Any]) -> list[Instrument]:
 def _seed_history_from_payload(
     payload: dict[str, Any],
 ) -> dict[str, list[FundamentalsSnapshot]]:
+    # The seed JSON predates the roic_pct field; synthesise it from the
+    # fields that are present so the offline UX (and screenshots) renders
+    # a realistic ROIC trend instead of "insufficient history".
+    from openbourse.providers.fmp import _synthetic_roic
+
     history: dict[str, list[FundamentalsSnapshot]] = {}
     for entry in payload["fundamentals"]:
         snap = FundamentalsSnapshot(
@@ -574,6 +579,10 @@ def _seed_history_from_payload(
             price_usd=entry.get("price_usd"),
             revenue_ttm_usd=entry.get("revenue_ttm_usd"),
             ebitda_ttm_usd=entry.get("ebitda_ttm_usd"),
+            roic_pct=_synthetic_roic(
+                float(entry["gross_margin_pct"]),
+                float(entry["fcf_yield_pct"]),
+            ),
         )
         history.setdefault(snap.ticker, []).append(snap)
     for snaps in history.values():
