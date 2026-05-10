@@ -563,19 +563,14 @@ def _load_default_history_fixture() -> dict[str, list[FundamentalsSnapshot]]:
             price_usd=entry.get("price_usd"),
             revenue_ttm_usd=entry.get("revenue_ttm_usd"),
             ebitda_ttm_usd=entry.get("ebitda_ttm_usd"),
-            # Seed file doesn't carry ROIC; synthesise a plausible value
-            # from gross margin + FCF yield so the offline ROIC chart
-            # has realistic shape. Heuristic-only, demo dataset only —
-            # real users get computed ROIC via yfinance/FMP backends.
-            roic_pct=_synthetic_roic(
-                float(entry["gross_margin_pct"]),
-                float(entry["fcf_yield_pct"]),
-            ),
+            # ROIC populated below once the per-ticker series is sorted —
+            # the synthesizer uses position-in-history to add upward drift
+            # for quality compounders, which can't happen until we know
+            # the position.
+            roic_pct=0.0,
         )
         history.setdefault(snap.ticker, []).append(snap)
-    for snaps in history.values():
-        snaps.sort(key=lambda s: s.as_of)
-    return history
+    return _populate_synthetic_roic(history)
 
 
 def _load_default_metadata_fixture() -> dict[str, Instrument]:
@@ -713,7 +708,36 @@ def _synthetic_band(
     return ValuationBand(label=label, current=current, history=tuple(history))
 
 
-def _synthetic_roic(gross_margin_pct: float, fcf_yield_pct: float) -> float:
+def _populate_synthetic_roic(
+    history: dict[str, list[FundamentalsSnapshot]],
+) -> dict[str, list[FundamentalsSnapshot]]:
+    """Sort each ticker's history and overwrite ``roic_pct`` with the year-aware synthesizer.
+
+    Returns a fresh dict — the snapshots are frozen, so we use
+    :func:`dataclasses.replace` to swap in the computed ROIC. Idempotent:
+    calling this on a result of itself produces the same output.
+    """
+    from dataclasses import replace
+
+    out: dict[str, list[FundamentalsSnapshot]] = {}
+    for ticker, snaps in history.items():
+        sorted_snaps = sorted(snaps, key=lambda s: s.as_of)
+        out[ticker] = [
+            replace(
+                s,
+                roic_pct=_synthetic_roic(s.gross_margin_pct, s.fcf_yield_pct, year_offset=i),
+            )
+            for i, s in enumerate(sorted_snaps)
+        ]
+    return out
+
+
+def _synthetic_roic(
+    gross_margin_pct: float,
+    fcf_yield_pct: float,
+    *,
+    year_offset: int = 0,
+) -> float:
     """Synthesise a plausible ROIC value for the bundled stub fixtures.
 
     Real ROIC is computed from operating income and invested capital;
@@ -724,11 +748,25 @@ def _synthetic_roic(gross_margin_pct: float, fcf_yield_pct: float) -> float:
     * Quality compounders (high margin, healthy FCF) read ~25-40% ROIC.
     * Mediocre businesses (10-30% margin, weak FCF) read ~5-15%.
     * Capital-light cyclicals can register near-zero.
+
+    ``year_offset`` is the snapshot's position in the ticker's sorted
+    history (0 = oldest). Each step adds drift proportional to the
+    quality signal — high-margin businesses see ROIC compound upward
+    year over year, low-margin ones drift sideways or down. Defaults
+    to 0 so callers that don't have ordering can still use the helper
+    for a single static value.
     """
     # Bounded gross-margin contribution: caps at 50% of margin (so 80%
     # gross margin → ~40 ROIC) and floors at zero.
     margin_part = max(0.0, gross_margin_pct) * 0.5
     # FCF yield as a kicker: 5% FCF → +5 to ROIC.
     fcf_part = max(0.0, fcf_yield_pct)
-    roic = margin_part * 0.6 + fcf_part * 1.0
-    return min(60.0, max(0.0, roic))
+    base = margin_part * 0.6 + fcf_part * 1.0
+
+    # Year-over-year drift weighted by margin quality. A 90% gross margin
+    # produces +1.2pp ROIC drift per year; a 10% gross margin produces
+    # roughly flat. Negative for sub-30% margin businesses (margin pressure
+    # eats invested-capital efficiency over time).
+    quality = (gross_margin_pct - 30.0) / 100.0
+    drift = year_offset * quality * 2.0
+    return min(60.0, max(0.0, base + drift))
