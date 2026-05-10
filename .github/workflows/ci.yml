@@ -50,7 +50,18 @@ jobs:
       - name: Install
         run: poetry install --extras dev
       - name: Run unit tests
-        run: poetry run pytest -m "not integration" --cov-report=xml
+        run: poetry run pytest -m "not integration" --cov-report=xml --cov-report=term
+      # Codecov is free for public repos and doesn't require a token.
+      # Only upload from the canonical Python version to avoid duplicate
+      # reports across the matrix; the matrix still runs the test suite
+      # on every supported version, just doesn't double-count coverage.
+      - name: Upload coverage to Codecov
+        if: matrix.python == '3.12'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
+          verbose: true
 
   integration:
     name: integration tests (postgres)

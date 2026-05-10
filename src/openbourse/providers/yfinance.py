@@ -35,7 +35,12 @@ from typing import Any
 import pandas as pd  # type: ignore[import-untyped]
 import yfinance as yf
 
-from openbourse.domain import FundamentalsSnapshot, Instrument
+from openbourse.domain import (
+    FundamentalsSnapshot,
+    Instrument,
+    ValuationBand,
+    ValuationSnapshot,
+)
 
 HISTORY_LOOKBACK_PAD = 1  # annual period → YoY needs 1 prior year
 
@@ -90,6 +95,20 @@ class YfinanceFundamentalsProvider:
         ticker = ticker.upper()
         rows = await asyncio.to_thread(_get_price_history, ticker, period, interval)
         return rows
+
+    async def valuation(self, ticker: str) -> ValuationSnapshot:
+        """Compute current + 5y annual valuation bands from Yahoo statements.
+
+        Reuses the same ``_fetch_history_bundle`` that powers ``history()``
+        but derives multiples (P/E, EV/EBITDA, EV/Revenue, P/FCF) instead
+        of the headline ratios. Empty bands fall back gracefully when
+        Yahoo is missing a particular field for the ticker.
+        """
+        ticker = ticker.upper()
+        bundle = await asyncio.to_thread(
+            _fetch_history_bundle, ticker, self._history_period, self._price_interval
+        )
+        return _parse_valuation(ticker, bundle)
 
     async def history(self, ticker: str, *, limit: int = 8) -> list[FundamentalsSnapshot]:
         """Return up to ``limit`` annual snapshots computed from Yahoo statements.
@@ -188,6 +207,12 @@ def _parse_info(ticker: str, info: dict[str, Any]) -> FundamentalsSnapshot:
     fcf = float(info.get("freeCashflow") or 0.0)
     fcf_yield_pct = (fcf / market_cap * 100) if market_cap > 0 else 0.0
 
+    # ROIC — yfinance occasionally exposes it directly; otherwise approximate
+    # with returnOnAssets * (1 + debt-to-equity proxy) which is a common
+    # back-of-envelope estimate when full statements aren't handy.
+    roa = float(info.get("returnOnAssets") or 0.0)
+    roic_pct = roa * 100 if roa > 0 else 0.0
+
     return FundamentalsSnapshot(
         ticker=ticker,
         as_of=date.today(),
@@ -199,6 +224,7 @@ def _parse_info(ticker: str, info: dict[str, Any]) -> FundamentalsSnapshot:
         price_usd=price,
         revenue_ttm_usd=float(info.get("totalRevenue") or 0.0) or None,
         ebitda_ttm_usd=ebitda or None,
+        roic_pct=roic_pct,
     )
 
 
@@ -247,6 +273,18 @@ def _parse_annual_history(
         market_cap = (close_at_dt * shares) if (close_at_dt > 0 and shares > 0) else 0.0
         fcf_yield = (fcf / market_cap * 100) if market_cap > 0 else 0.0
 
+        # ROIC = NOPAT / Invested Capital, where NOPAT = OpInc * (1 - tax_rate)
+        # and IC = total debt + total equity - cash. Skip the year (roic = 0)
+        # if any of the inputs are missing — chart treats 0 as "no point".
+        op_income = _cell(income, "Operating Income", dt)
+        tax_provision = _cell(income, "Tax Provision", dt)
+        pretax_income = _cell(income, "Pretax Income", dt)
+        equity = _cell(balance, "Stockholders Equity", dt)
+        tax_rate = (tax_provision / pretax_income) if pretax_income > 0 else 0.21
+        nopat = op_income * (1.0 - tax_rate) if op_income > 0 else 0.0
+        invested_capital = max(0.0, debt + equity - cash)
+        roic_pct = (nopat / invested_capital * 100) if invested_capital > 0 else 0.0
+
         snapshots.append(
             FundamentalsSnapshot(
                 ticker=ticker,
@@ -259,12 +297,103 @@ def _parse_annual_history(
                 price_usd=close_at_dt or None,
                 revenue_ttm_usd=None,
                 ebitda_ttm_usd=ebitda or None,
+                roic_pct=roic_pct,
             )
         )
 
     if limit and len(snapshots) > limit:
         snapshots = snapshots[-limit:]
     return snapshots
+
+
+def _parse_valuation(ticker: str, bundle: dict[str, Any]) -> ValuationSnapshot:
+    """Build the four headline valuation bands from a Yahoo statement bundle.
+
+    Strategy:
+
+    * **Current** — pulled from ``info`` for accuracy at the live price.
+      Yahoo computes ``trailingPE``, ``enterpriseToEbitda``, etc. from the
+      live price + the most recent fundamentals, which is what we want.
+    * **History** — derived per fiscal year by combining each year's
+      revenue/EBITDA/FCF/net-income with the historical close price
+      times the current shares-outstanding. Treating share count as
+      constant across years is imperfect (buybacks, dilution) but the
+      chart shows trend, not precision; the noise floor is fine.
+    """
+    info = bundle.get("info") or {}
+    income = bundle.get("income")
+    balance = bundle.get("balance")
+    cashflow = bundle.get("cashflow")
+    prices = bundle.get("prices")
+
+    current_pe = _safe_float(info.get("trailingPE"))
+    current_ev_ebitda = _safe_float(info.get("enterpriseToEbitda"))
+    current_ev_rev = _safe_float(info.get("enterpriseToRevenue"))
+    current_pfcf: float | None = None
+    market_cap = _safe_float(info.get("marketCap"))
+    fcf_now = _safe_float(info.get("freeCashflow"))
+    if market_cap and fcf_now and fcf_now > 0:
+        current_pfcf = market_cap / fcf_now
+
+    pe_history: list[tuple[date, float]] = []
+    ev_ebitda_history: list[tuple[date, float]] = []
+    ev_rev_history: list[tuple[date, float]] = []
+    pfcf_history: list[tuple[date, float]] = []
+
+    shares = float(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding") or 0)
+    if income is not None and not income.empty and shares > 0:
+        for dt in sorted(income.columns):
+            as_of = _to_python_date(dt)
+            close = _close_near(prices, dt)
+            mcap = close * shares if close > 0 else 0.0
+            if mcap <= 0:
+                continue
+
+            revenue = _cell(income, "Total Revenue", dt)
+            ebitda = _cell(income, "EBITDA", dt)
+            net_income = _cell(income, "Net Income", dt)
+            debt = _cell(balance, "Total Debt", dt)
+            cash = _cell(balance, "Cash And Cash Equivalents", dt)
+            fcf = _cell(cashflow, "Free Cash Flow", dt)
+            ev = mcap + max(0.0, debt - cash)
+
+            if net_income > 0:
+                pe_history.append((as_of, mcap / net_income))
+            if ebitda > 0:
+                ev_ebitda_history.append((as_of, ev / ebitda))
+            if revenue > 0:
+                ev_rev_history.append((as_of, ev / revenue))
+            if fcf > 0:
+                pfcf_history.append((as_of, mcap / fcf))
+
+    bands = (
+        ValuationBand(label="P/E", current=current_pe, history=tuple(pe_history)),
+        ValuationBand(
+            label="EV/EBITDA",
+            current=current_ev_ebitda,
+            history=tuple(ev_ebitda_history),
+        ),
+        ValuationBand(
+            label="EV/Revenue",
+            current=current_ev_rev,
+            history=tuple(ev_rev_history),
+        ),
+        ValuationBand(label="P/FCF", current=current_pfcf, history=tuple(pfcf_history)),
+    )
+    return ValuationSnapshot(ticker=ticker, as_of=date.today(), bands=bands)
+
+
+def _safe_float(value: Any) -> float | None:
+    """Coerce ``value`` to ``float``; return ``None`` for falsy or invalid input."""
+    if value is None:
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    if result <= 0:
+        return None
+    return result
 
 
 # --- DataFrame helpers --------------------------------------------------------

@@ -24,7 +24,12 @@ from typing import Any
 
 import httpx
 
-from openbourse.domain import FundamentalsSnapshot, Instrument
+from openbourse.domain import (
+    FundamentalsSnapshot,
+    Instrument,
+    ValuationBand,
+    ValuationSnapshot,
+)
 
 FMP_BASE_URL = "https://financialmodelingprep.com/stable"
 # Free-tier FMP caps every statement endpoint at 5 rows total. We default to
@@ -145,6 +150,21 @@ class FmpFundamentalsProvider:
             business_summary=row.get("description"),
         )
 
+    async def valuation(self, ticker: str) -> ValuationSnapshot:
+        """Pull current + historical valuation multiples from FMP.
+
+        Current values come from ``/key-metrics-ttm`` and ``/ratios-ttm``
+        (both free-tier). Historical bands come from ``/historical-key-metrics``
+        which is paid; on free tier it 402s and we return current-only
+        bands. The brief screen renders gracefully either way.
+        """
+        ticker = ticker.upper()
+        km_ttm, hist = await asyncio.gather(
+            self._safe_get("/key-metrics-ttm", symbol=ticker),
+            self._safe_get("/historical-key-metrics", symbol=ticker, period="annual", limit=5),
+        )
+        return _parse_fmp_valuation(ticker, km_ttm, hist)
+
     async def history(
         self,
         ticker: str,
@@ -263,6 +283,8 @@ def _parse_current_fundamentals(
         price_usd=price,
         revenue_ttm_usd=None,
         ebitda_ttm_usd=None,
+        # FMP's key-metrics-ttm exposes ROIC as a decimal (e.g. 0.18 for 18%).
+        roic_pct=float(km_row.get("roicTTM") or 0.0) * 100,
     )
 
 
@@ -328,6 +350,19 @@ def _parse_history(
         fcf_yield_pct = (rolled_fcf / market_cap) * 100 if market_cap > 0 else 0.0
         price = _f(ev_row.get("stockPrice")) or None
 
+        # ROIC = NOPAT / Invested Capital. NOPAT ~= operatingIncome * (1 - tax).
+        # Invested Capital ~= totalDebt + totalEquity - cash.
+        op_income = _f(row.get("operatingIncome"))
+        tax_provision = _f(row.get("incomeTaxExpense"))
+        pretax = _f(row.get("incomeBeforeTax"))
+        equity = _f(bal.get("totalStockholdersEquity"))
+        cash = _f(bal.get("cashAndCashEquivalents"))
+        debt = _f(bal.get("totalDebt"))
+        tax_rate = (tax_provision / pretax) if pretax > 0 else 0.21
+        nopat = op_income * (1.0 - tax_rate) if op_income > 0 else 0.0
+        invested_capital = max(0.0, debt + equity - cash)
+        roic_pct = (nopat / invested_capital * 100) if invested_capital > 0 else 0.0
+
         snapshots.append(
             FundamentalsSnapshot(
                 ticker=ticker,
@@ -340,6 +375,7 @@ def _parse_history(
                 price_usd=price,
                 revenue_ttm_usd=None,
                 ebitda_ttm_usd=rolled_ebitda or None,
+                roic_pct=roic_pct,
             )
         )
 
@@ -446,6 +482,20 @@ class StubFundamentalsProvider:
         except KeyError as exc:
             raise KeyError(f"unknown ticker: {ticker}") from exc
 
+    async def valuation(self, ticker: str) -> ValuationSnapshot:
+        """Return synthetic but plausible valuation bands for ``ticker``.
+
+        Computes current multiples from the latest fixture snapshot and
+        derives synthetic ±25% historical bands so the panel renders
+        with a realistic-looking range in offline mode and screenshots.
+        Real users get computed bands via the yfinance/FMP backends.
+        """
+        ticker = ticker.upper()
+        snaps = self._history_fixture.get(ticker, [])
+        if not snaps:
+            return ValuationSnapshot(ticker=ticker, as_of=date.today())
+        return _compute_stub_valuation(ticker, snaps)
+
     async def price_history(
         self, ticker: str, *, period: str = "3y", interval: str = "1d"
     ) -> list[tuple[date, float]]:
@@ -513,6 +563,14 @@ def _load_default_history_fixture() -> dict[str, list[FundamentalsSnapshot]]:
             price_usd=entry.get("price_usd"),
             revenue_ttm_usd=entry.get("revenue_ttm_usd"),
             ebitda_ttm_usd=entry.get("ebitda_ttm_usd"),
+            # Seed file doesn't carry ROIC; synthesise a plausible value
+            # from gross margin + FCF yield so the offline ROIC chart
+            # has realistic shape. Heuristic-only, demo dataset only —
+            # real users get computed ROIC via yfinance/FMP backends.
+            roic_pct=_synthetic_roic(
+                float(entry["gross_margin_pct"]),
+                float(entry["fcf_yield_pct"]),
+            ),
         )
         history.setdefault(snap.ticker, []).append(snap)
     for snaps in history.values():
@@ -533,3 +591,144 @@ def _load_default_metadata_fixture() -> dict[str, Instrument]:
             cik=entry.get("cik"),
         )
     return out
+
+
+def _parse_fmp_valuation(ticker: str, km_ttm: Any, hist: Any) -> ValuationSnapshot:
+    """Build a :class:`ValuationSnapshot` from FMP's TTM + historical endpoints.
+
+    Current values are pulled from the first row of ``/key-metrics-ttm``;
+    historical bands from ``/historical-key-metrics`` ascending by date.
+    Each metric is independent — if FMP's free tier has hidden the
+    historical endpoint behind a 402, current-only bands still render.
+    """
+    km_row = km_ttm[0] if isinstance(km_ttm, list) and km_ttm else {}
+    current_pe = _f(km_row.get("peRatioTTM")) or None
+    current_ev_ebitda = _f(km_row.get("enterpriseValueOverEBITDATTM")) or None
+    current_ev_rev = _f(km_row.get("evToSalesTTM")) or None
+    current_pfcf = _f(km_row.get("priceToFreeCashFlowsRatioTTM")) or None
+
+    pe_hist: list[tuple[date, float]] = []
+    ev_ebitda_hist: list[tuple[date, float]] = []
+    ev_rev_hist: list[tuple[date, float]] = []
+    pfcf_hist: list[tuple[date, float]] = []
+
+    if isinstance(hist, list):
+        for row in sorted(hist, key=lambda r: str(r.get("date", ""))):
+            if not isinstance(row, dict):
+                continue
+            row_date_str = row.get("date")
+            if not isinstance(row_date_str, str):
+                continue
+            try:
+                row_date = date.fromisoformat(row_date_str[:10])
+            except (TypeError, ValueError):
+                continue
+
+            pe = _f(row.get("peRatio")) or 0.0
+            if pe > 0:
+                pe_hist.append((row_date, pe))
+            ev_ebitda = _f(row.get("enterpriseValueOverEBITDA")) or 0.0
+            if ev_ebitda > 0:
+                ev_ebitda_hist.append((row_date, ev_ebitda))
+            ev_rev = _f(row.get("evToSales")) or 0.0
+            if ev_rev > 0:
+                ev_rev_hist.append((row_date, ev_rev))
+            pfcf = _f(row.get("priceToFreeCashFlowsRatio")) or 0.0
+            if pfcf > 0:
+                pfcf_hist.append((row_date, pfcf))
+
+    bands = (
+        ValuationBand(label="P/E", current=current_pe, history=tuple(pe_hist)),
+        ValuationBand(label="EV/EBITDA", current=current_ev_ebitda, history=tuple(ev_ebitda_hist)),
+        ValuationBand(label="EV/Revenue", current=current_ev_rev, history=tuple(ev_rev_hist)),
+        ValuationBand(label="P/FCF", current=current_pfcf, history=tuple(pfcf_hist)),
+    )
+    return ValuationSnapshot(ticker=ticker, as_of=date.today(), bands=bands)
+
+
+def _compute_stub_valuation(ticker: str, snaps: list[FundamentalsSnapshot]) -> ValuationSnapshot:
+    """Build a synthetic but plausible valuation snapshot for the stub.
+
+    Uses the latest snapshot's market cap, FCF yield, and revenue/EBITDA
+    to derive current multiples, then synthesises ±25% historical bands
+    around each so the panel renders with a realistic-looking range in
+    offline mode and screenshots.
+    """
+    latest = snaps[-1]
+    bands: list[ValuationBand] = []
+
+    # P/E doesn't have a clean derivation from the snapshot fields we
+    # carry (no net income), so we approximate as 1 / FCF yield * a
+    # plausible "FCF coverage" factor. Good enough for offline UX.
+    pe_current: float | None = None
+    if latest.fcf_yield_pct > 0:
+        pe_current = 100.0 / latest.fcf_yield_pct * 1.2
+    bands.append(_synthetic_band("P/E", pe_current, snaps, percent_window=0.25))
+
+    ev_to_ebitda_current: float | None = None
+    if latest.ebitda_ttm_usd and latest.ebitda_ttm_usd > 0:
+        net_debt = latest.net_debt_to_ebitda * latest.ebitda_ttm_usd
+        ev = latest.market_cap_usd + net_debt
+        ev_to_ebitda_current = ev / latest.ebitda_ttm_usd
+    bands.append(_synthetic_band("EV/EBITDA", ev_to_ebitda_current, snaps, percent_window=0.30))
+
+    ev_to_rev_current: float | None = None
+    if latest.revenue_ttm_usd and latest.revenue_ttm_usd > 0:
+        net_debt = latest.net_debt_to_ebitda * (latest.ebitda_ttm_usd or 0)
+        ev = latest.market_cap_usd + net_debt
+        ev_to_rev_current = ev / latest.revenue_ttm_usd
+    bands.append(_synthetic_band("EV/Revenue", ev_to_rev_current, snaps, percent_window=0.30))
+
+    pfcf_current: float | None = None
+    if latest.fcf_yield_pct > 0:
+        pfcf_current = 100.0 / latest.fcf_yield_pct
+    bands.append(_synthetic_band("P/FCF", pfcf_current, snaps, percent_window=0.30))
+
+    return ValuationSnapshot(ticker=ticker, as_of=latest.as_of, bands=tuple(bands))
+
+
+def _synthetic_band(
+    label: str,
+    current: float | None,
+    snaps: list[FundamentalsSnapshot],
+    *,
+    percent_window: float,
+) -> ValuationBand:
+    """Build a band whose history oscillates ±``percent_window`` around current.
+
+    Each historical point is anchored to a snapshot date, with the value
+    sinusoidally varied so the resulting band has a realistic high/low/median
+    spread without needing per-ticker fundamentals back-calculation.
+    """
+    if current is None or len(snaps) < 2:
+        return ValuationBand(label=label, current=current)
+    import math
+
+    history: list[tuple[date, float]] = []
+    for i, snap in enumerate(snaps):
+        # Phase shifts each ticker's wave so different metrics aren't lockstep.
+        phase = (hash(label) + i) % 7
+        offset = math.sin((i + phase) * math.pi / 3) * percent_window
+        history.append((snap.as_of, current * (1 + offset)))
+    return ValuationBand(label=label, current=current, history=tuple(history))
+
+
+def _synthetic_roic(gross_margin_pct: float, fcf_yield_pct: float) -> float:
+    """Synthesise a plausible ROIC value for the bundled stub fixtures.
+
+    Real ROIC is computed from operating income and invested capital;
+    the seed file doesn't carry those, but gross margin and FCF yield
+    correlate enough with capital efficiency to produce realistic-
+    looking offline screenshots. Rough heuristic:
+
+    * Quality compounders (high margin, healthy FCF) read ~25-40% ROIC.
+    * Mediocre businesses (10-30% margin, weak FCF) read ~5-15%.
+    * Capital-light cyclicals can register near-zero.
+    """
+    # Bounded gross-margin contribution: caps at 50% of margin (so 80%
+    # gross margin → ~40 ROIC) and floors at zero.
+    margin_part = max(0.0, gross_margin_pct) * 0.5
+    # FCF yield as a kicker: 5% FCF → +5 to ROIC.
+    fcf_part = max(0.0, fcf_yield_pct)
+    roic = margin_part * 0.6 + fcf_part * 1.0
+    return min(60.0, max(0.0, roic))

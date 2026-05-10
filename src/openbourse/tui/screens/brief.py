@@ -24,7 +24,7 @@ from openbourse.providers import Filing, Providers
 from openbourse.screening import compute_style_fit
 from openbourse.screening.concerns import DEFAULT_CONCERNS
 from openbourse.screening.risk_factors import extract_risk_factors
-from openbourse.tui.widgets import HistoryCharts, PriceChart
+from openbourse.tui.widgets import HistoryCharts, PriceChart, RoicChart, ValuationPanel
 
 _CONCERN_GLYPHS = {
     "flagged": ("⚠", "yellow"),
@@ -170,6 +170,15 @@ class BriefScreen(Screen[None]):
                 # 2x2 fundamentals trend grid. Self-handles "insufficient
                 # history" so ad-hoc lookups still render.
                 yield HistoryCharts(self._history)
+                # ROIC trend — separate full-width chart because it's the
+                # headline quality metric and reads better at full width
+                # than as a small grid cell.
+                yield RoicChart(self._history, chart_width=70)
+                # Valuation panel — populated by the worker once
+                # providers.fundamentals.valuation() returns. Renders a
+                # "loading…" placeholder until then so the layout
+                # doesn't reflow when the data lands.
+                yield ValuationPanel()
             with VerticalScroll(id="brief-right"):
                 yield LoadingIndicator(id="brief-loading")
                 yield Static("", id="brief-body")
@@ -206,7 +215,17 @@ class BriefScreen(Screen[None]):
             except (OSError, ValueError):  # pragma: no cover - provider edge case
                 return []
 
-        filings, price_points = await asyncio.gather(_fetch_filings(), _fetch_prices())
+        async def _fetch_valuation() -> object | None:
+            try:
+                return await self._providers.fundamentals.valuation(c.instrument.ticker)
+            except (OSError, ValueError, KeyError):  # pragma: no cover - provider edge case
+                return None
+
+        filings, price_points, valuation = await asyncio.gather(
+            _fetch_filings(), _fetch_prices(), _fetch_valuation()
+        )
+        # Render valuation as soon as it lands — independent of brief/filings.
+        self._render_valuation(valuation)
         # The brief generator depends on filings, so it runs after them.
         brief = await self._providers.brief.write_brief(c.instrument, c.snapshot, filings)
         self._brief = brief
@@ -338,6 +357,22 @@ class BriefScreen(Screen[None]):
         self.query_one("#brief-loading", LoadingIndicator).display = False
         body = self.query_one("#brief-body", Static)
         body.update(_format_brief_body(brief))
+
+    def _render_valuation(self, snapshot: object | None) -> None:
+        """Forward the loaded :class:`ValuationSnapshot` to the panel widget.
+
+        Typed loosely (``object``) at the call boundary because the
+        worker uses ``asyncio.gather`` whose return type is widened —
+        the panel itself accepts ``ValuationSnapshot | None`` and falls
+        back to a placeholder for any other input.
+        """
+        from openbourse.domain import ValuationSnapshot
+
+        panel = self.query_one(ValuationPanel)
+        if isinstance(snapshot, ValuationSnapshot):
+            panel.set_snapshot(snapshot)
+        else:
+            panel.set_snapshot(None)
 
     def action_rescan_concerns(self) -> None:
         """Force a fresh 10-K concern scan, bypassing the DB cache.
@@ -498,12 +533,18 @@ class BriefScreen(Screen[None]):
             return
 
         self._history = list(history)
-        # Swap the chart widget in place inside the left column so the
-        # user sees populated charts without having to back out.
-        old = self.query_one(HistoryCharts)
-        await old.remove()
+        # Swap the trend grid + ROIC chart in place inside the left
+        # column so the user sees populated charts without having to
+        # back out and re-enter the brief.
+        old_grid = self.query_one(HistoryCharts)
+        old_roic = self.query_one(RoicChart)
+        await old_grid.remove()
+        await old_roic.remove()
         left = self.query_one("#brief-left", VerticalScroll)
+        # Re-mount in the original order (grid first, then ROIC) so the
+        # ValuationPanel below them stays where it was.
         await left.mount(HistoryCharts(self._history))
+        await left.mount(RoicChart(self._history, chart_width=70))
         self.app.notify(
             f"Loaded {len(history)} history points for {ticker}.",
             title="Download complete",

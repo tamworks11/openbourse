@@ -56,6 +56,11 @@ class FundamentalsSnapshot:
     price_usd: float | None = None
     revenue_ttm_usd: float | None = None
     ebitda_ttm_usd: float | None = None
+    # Return on invested capital, in percent. 0.0 when the underlying
+    # provider can't produce one (statements missing tax info, balance-
+    # sheet items, etc.) — the chart treats 0 as "no data" by skipping
+    # the point rather than rendering a flat line at zero.
+    roic_pct: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +123,93 @@ class ScreenResult:
     def filtered_count(self) -> int:
         """Number of instruments that survived the screen's filter."""
         return len(self.candidates)
+
+
+@dataclass(frozen=True, slots=True)
+class ValuationBand:
+    """One valuation multiple's current value plus N-year history.
+
+    Lives next to :class:`FundamentalsSnapshot` because both describe a
+    single instrument at a point in time, but valuation is a separate
+    concept: it composes price *and* fundamentals, so it changes whenever
+    either side changes — far more often than the underlying snapshot.
+
+    ``history`` is ascending by date. Empty history means we couldn't
+    construct one (e.g., insufficient back-statements on the free tier);
+    the band will still render with the current value but no comparison.
+    """
+
+    label: str  # human-readable: "P/E", "EV/EBITDA", "EV/Revenue", "P/FCF"
+    current: float | None
+    history: tuple[tuple[date, float], ...] = ()
+
+    @property
+    def has_history(self) -> bool:
+        """True iff there are at least two historical points to band from."""
+        return len(self.history) >= 2
+
+    @property
+    def low(self) -> float | None:
+        """Minimum value across the historical series. ``None`` if empty."""
+        if not self.history:
+            return None
+        return min(v for _, v in self.history)
+
+    @property
+    def high(self) -> float | None:
+        """Maximum value across the historical series. ``None`` if empty."""
+        if not self.history:
+            return None
+        return max(v for _, v in self.history)
+
+    @property
+    def median(self) -> float | None:
+        """Median value across the historical series. ``None`` if empty.
+
+        Linear interpolation when the count is even — just the average of
+        the two centre values, which is the standard convention.
+        """
+        if not self.history:
+            return None
+        vals = sorted(v for _, v in self.history)
+        n = len(vals)
+        if n % 2 == 1:
+            return vals[n // 2]
+        return (vals[n // 2 - 1] + vals[n // 2]) / 2
+
+    def percentile_rank(self) -> float | None:
+        """Where ``current`` sits in the historical distribution, 0-100.
+
+        0 means at-or-below the all-time low, 100 means at-or-above the
+        all-time high, 50 means exactly at the median. Returns ``None``
+        when there's no current value or no history. Range collapses
+        (every historical value identical) return 50 by convention so
+        the visual band still shows something.
+        """
+        if self.current is None or not self.history:
+            return None
+        low = self.low
+        high = self.high
+        if low is None or high is None:
+            return None
+        if high == low:
+            return 50.0
+        ratio = (self.current - low) / (high - low)
+        return max(0.0, min(100.0, ratio * 100))
+
+
+@dataclass(frozen=True, slots=True)
+class ValuationSnapshot:
+    """Composite valuation read for a single ticker.
+
+    Contains one :class:`ValuationBand` per multiple we track. The TUI
+    iterates the bands tuple in order to render the panel — providers
+    should keep a stable ordering across calls so the UI doesn't reshuffle.
+    """
+
+    ticker: str
+    as_of: date
+    bands: tuple[ValuationBand, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -22,6 +22,7 @@ from openbourse.domain import (
     FundamentalsSnapshot,
     Instrument,
     Quote,
+    ValuationSnapshot,
 )
 
 
@@ -51,6 +52,22 @@ class FundamentalsProvider(Protocol):
         Snapshots are returned ascending by ``as_of`` so callers can feed
         them straight into a chart. Implementations should silently return
         an empty list when no history is available rather than raising.
+        """
+        ...
+
+    async def valuation(self, ticker: str) -> ValuationSnapshot:
+        """Return current + historical valuation multiples for ``ticker``.
+
+        Composes price, fundamentals, and historical statements into a
+        :class:`~openbourse.domain.ValuationSnapshot` with one
+        :class:`~openbourse.domain.ValuationBand` per multiple
+        (P/E, EV/EBITDA, EV/Revenue, P/FCF). Bands without a current
+        value or with empty history are still returned — the UI renders
+        whatever's available.
+
+        Implementations should silently return an empty snapshot rather
+        than raise when data isn't available; the brief screen treats
+        missing valuation as "no data" rather than as an error.
         """
         ...
 

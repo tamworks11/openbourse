@@ -78,6 +78,11 @@ class FundamentalsRow(Base):
     price_usd: Mapped[float | None] = mapped_column(Float)
     revenue_ttm_usd: Mapped[float | None] = mapped_column(Float)
     ebitda_ttm_usd: Mapped[float | None] = mapped_column(Float)
+    # Return on invested capital, in percent. Default 0 stands in for
+    # "provider couldn't compute" so existing rows from before this
+    # column landed read back as 0 and the ROIC chart treats them as
+    # no-data points (filtered before plotting).
+    roic_pct: Mapped[float] = mapped_column(Float, nullable=False, server_default="0.0")
 
     instrument: Mapped[InstrumentRow] = relationship(back_populates="snapshots")
 

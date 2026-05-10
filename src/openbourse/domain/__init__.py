@@ -13,6 +13,8 @@ from openbourse.domain.models import (
     Quote,
     ScreenDefinition,
     ScreenResult,
+    ValuationBand,
+    ValuationSnapshot,
     Verdict,
 )
 
@@ -25,5 +27,7 @@ __all__ = [
     "Quote",
     "ScreenDefinition",
     "ScreenResult",
+    "ValuationBand",
+    "ValuationSnapshot",
     "Verdict",
 ]

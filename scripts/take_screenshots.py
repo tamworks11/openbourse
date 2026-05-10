@@ -36,7 +36,7 @@ from openbourse.providers import build_providers
 from openbourse.tui import BourseApp
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "docs" / "screenshots"
-SIZE = (160, 50)  # wide enough to show the right-side detail pane comfortably
+SIZE = (160, 70)  # wide enough for detail pane; tall enough for ROIC + valuation
 
 
 async def _shoot_screener(out: Path) -> None:

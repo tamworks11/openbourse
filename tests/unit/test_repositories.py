@@ -64,6 +64,50 @@ async def test_fundamentals_upsert_round_trip(
     assert snap.market_cap_usd == sample_snapshot.market_cap_usd
 
 
+async def test_fundamentals_upsert_persists_all_metric_fields(
+    db_session: AsyncSession,
+) -> None:
+    """Every field on FundamentalsSnapshot survives a DB round-trip.
+
+    Regression test for the bug where ROIC was computed by the provider
+    but silently dropped on insert because the column was missing —
+    every new metric should ride this test or have its own.
+    """
+    from datetime import date
+
+    instr_repo = InstrumentRepository(db_session)
+    fund_repo = FundamentalsRepository(db_session)
+    inst_row = await instr_repo.upsert(Instrument(ticker="X", name="X Corp"))
+    await db_session.flush()
+
+    written = FundamentalsSnapshot(
+        ticker="X",
+        as_of=date(2026, 1, 1),
+        market_cap_usd=10e9,
+        revenue_growth_pct=18.4,
+        gross_margin_pct=89.1,
+        net_debt_to_ebitda=0.2,
+        fcf_yield_pct=2.8,
+        price_usd=42.50,
+        revenue_ttm_usd=5.4e9,
+        ebitda_ttm_usd=1.8e9,
+        roic_pct=22.7,
+    )
+    await fund_repo.upsert(inst_row.id, written)
+    await db_session.commit()
+
+    pairs = await fund_repo.latest_for_all()
+    _, read = pairs[0]
+    # Spot-check every field — anything dropped here will silently
+    # break a downstream chart, so the round-trip is the right gate.
+    assert read.roic_pct == 22.7
+    assert read.price_usd == 42.50
+    assert read.revenue_ttm_usd == 5.4e9
+    assert read.ebitda_ttm_usd == 1.8e9
+    assert read.market_cap_usd == 10e9
+    assert read.gross_margin_pct == 89.1
+
+
 async def test_fundamentals_upsert_updates_existing_row(
     db_session: AsyncSession, sample_snapshot: FundamentalsSnapshot
 ) -> None:

@@ -53,6 +53,7 @@ def _to_snapshot(row: FundamentalsRow, ticker: str) -> FundamentalsSnapshot:
         price_usd=row.price_usd,
         revenue_ttm_usd=row.revenue_ttm_usd,
         ebitda_ttm_usd=row.ebitda_ttm_usd,
+        roic_pct=row.roic_pct,
     )
 
 
@@ -135,6 +136,7 @@ class FundamentalsRepository:
             "price_usd": snapshot.price_usd,
             "revenue_ttm_usd": snapshot.revenue_ttm_usd,
             "ebitda_ttm_usd": snapshot.ebitda_ttm_usd,
+            "roic_pct": snapshot.roic_pct,
         }
         update_cols = {k: v for k, v in values.items() if k not in {"instrument_id", "as_of"}}
 

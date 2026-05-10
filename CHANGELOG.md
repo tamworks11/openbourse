@@ -64,6 +64,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1000-name universe gets fresh quotes on the next poll cycle instead
   of staying stuck at snapshot prices. Hard-capped at 100 tickers per
   cycle to protect against extra-tall terminals or huge universes.
+- **Valuation panel** — new section on the brief screen showing P/E,
+  EV/EBITDA, EV/Revenue, and P/FCF for the focused ticker, each with a
+  percentile-rank bar against its own 5-year history. Bar colour
+  encodes cheap (green ≤30th pct), fair (yellow), or expensive (red
+  ≥70th pct) — same band logic as the risk-score column on the
+  screener so the visual language stays consistent. Loads independently
+  of the AI brief so the price chart and trend grid don't wait for
+  multiples. New `FundamentalsProvider.valuation()` Protocol method
+  with stub, yfinance, and FMP implementations; FMP free-tier returns
+  current-only bands and the panel renders gracefully without history.
+- **ROIC trend chart** — separate full-width chart on the brief screen
+  between the 2x2 fundamentals grid and the valuation panel. Plots
+  Return on Invested Capital over the same annual snapshots as the
+  trend grid, with the current value and percentage-point change in
+  the title. New `FundamentalsSnapshot.roic_pct` field; yfinance
+  computes from operating income / invested capital, FMP pulls
+  `roicTTM` from `/key-metrics-ttm`, the stub synthesises from gross
+  margin + FCF yield. Snapshots with ROIC=0 (provider couldn't compute)
+  are dropped before charting so the line doesn't dip to zero.
 
 ### Changed
 

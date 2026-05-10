@@ -1,0 +1,57 @@
+# Codecov configuration.
+# Reference: https://docs.codecov.com/docs/codecov-yaml
+#
+# Two separate gates:
+#
+# * **project**  — total repo coverage. ``auto`` target tracks the
+#   current value; a PR that drops total coverage by more than 2pp
+#   fails the status check. Refactors that move code around won't
+#   trip this; genuine regressions will.
+#
+# * **patch**    — coverage of *new* code in a PR's diff. 70% target
+#   matches the project's current baseline so contributors aren't
+#   punished for touching legacy under-tested areas, but encourages
+#   tests for new logic. Threshold of 10pp gives slack for hard-to-
+#   unit-test additions (Textual widgets, async TUI workers).
+
+codecov:
+  # Don't post a coverage status when the test run itself failed —
+  # avoids confusing "coverage OK but tests broken" PR checks.
+  require_ci_to_pass: true
+
+coverage:
+  precision: 1
+  round: down
+  # Renders the percentage red below 60, yellow 60-90, green above 90
+  # in dashboards and PR comments.
+  range: "60...90"
+
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 2%
+        if_ci_failed: error
+    patch:
+      default:
+        target: 70%
+        threshold: 10%
+        if_ci_failed: error
+
+# Paths excluded from coverage entirely. These either aren't real
+# Python (data files), are exercised only by integration tests
+# (Alembic migrations), or are one-off scripts.
+ignore:
+  - "alembic/**"
+  - "scripts/**"
+  - "tests/**"
+  - "src/openbourse/data/**"
+
+comment:
+  # Single comment per PR with a coverage delta. ``default`` updates
+  # the existing comment in place rather than posting duplicates.
+  layout: "header, diff, files"
+  behavior: default
+  # Post even when coverage is unchanged so the comment stays fresh
+  # and visible across the PR's full review history.
+  require_changes: false
