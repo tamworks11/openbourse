@@ -21,13 +21,14 @@ The command bar accepts simple line-driven commands (``lookup INTC``,
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from typing import ClassVar
 
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
+from textual.coordinate import Coordinate
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Input, Static
 
@@ -122,6 +123,40 @@ def _format_price(price: float | None) -> str:
     return f"${price:,.2f}"
 
 
+def _select_tickers_to_poll(
+    candidates: Sequence[Candidate],
+    *,
+    visible_first: int,
+    visible_last: int,
+    cursor: int | None,
+    padding: int,
+    cap: int,
+) -> list[str]:
+    """Pick the candidate tickers to fetch on the next quote poll.
+
+    Pure function so the row-window math stays unit-testable without a
+    live DataTable. Combines:
+
+    * The visible row range ``[visible_first, visible_last)``.
+    * ``padding`` rows on each side, clamped to the candidates list.
+    * The cursor's row (always included so a programmatic jump or focus
+      change can't leave the detail pane stuck on a stale price).
+
+    Capped at ``cap`` total tickers to prevent runaway upstream requests
+    on extra-tall terminals.
+    """
+    total = len(candidates)
+    if total == 0:
+        return []
+    start = max(0, visible_first - padding)
+    end = min(total, visible_last + padding)
+    indices: set[int] = set(range(start, end)) if end > start else set()
+    if cursor is not None and 0 <= cursor < total:
+        indices.add(cursor)
+    sorted_indices = sorted(indices)[:cap]
+    return [candidates[i].instrument.ticker for i in sorted_indices]
+
+
 def _truncate_summary(text: str, *, max_chars: int = 280) -> str:
     """Trim a long business summary to ~``max_chars``, breaking on a sentence end.
 
@@ -166,6 +201,17 @@ class ScreenerScreen(Screen[None]):
         Binding("w", "watchlist", "Watchlist"),
     ]
 
+    # Hard cap on tickers polled per refresh cycle, regardless of how
+    # many are visible. yfinance has no batch endpoint and Yahoo throttles
+    # past ~30 req/min from a single client, so even a tall terminal
+    # showing 200+ rows shouldn't trigger a 200-request burst.
+    QUOTE_POLL_TICKER_CAP: ClassVar[int] = 100
+    # Rows polled above/below the visible window. With 20 rows of padding,
+    # a single PgDn lands on already-fresh prices instead of waiting a
+    # full poll cycle.
+    QUOTE_POLL_VIEWPORT_PADDING: ClassVar[int] = 20
+    PRICE_COLUMN_INDEX: ClassVar[int] = 3  # tracks COLUMNS order: # | TICKER | NAME | PRICE | …
+
     def __init__(
         self,
         *,
@@ -181,6 +227,10 @@ class ScreenerScreen(Screen[None]):
         self._history = history or {}
         self._service = ScreeningService()
         self._result: ScreenResult | None = None
+        # Per-ticker price overrides applied on top of the snapshot's
+        # ``price_usd``. Updated by the polling worker. The detail pane
+        # and any cell-update logic should prefer this when present.
+        self._quote_overrides: dict[str, float] = {}
 
     def compose(self) -> ComposeResult:
         """Build the full-bleed layout: status / split top / table / command / footer."""
@@ -207,11 +257,156 @@ class ScreenerScreen(Screen[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        """Wire columns onto the table and run the screen for the first time."""
+        """Wire columns onto the table, run the first screen, start the quote loop."""
         table = self.query_one("#candidates", DataTable)
         table.add_columns(*COLUMNS)
         self.refresh_results()
         table.focus()
+        self._start_quote_polling()
+
+    def _start_quote_polling(self) -> None:
+        """Schedule a periodic worker to refresh prices in place.
+
+        Reads ``OPENBOURSE_QUOTE_REFRESH_SECONDS`` from settings. ``0``
+        disables polling entirely; positive values create a ``set_interval``
+        loop that fires the worker. The first poll runs immediately so
+        the user doesn't have to wait the full interval to see live data.
+        """
+        from openbourse.config import get_settings
+
+        interval = get_settings().quote_refresh_seconds
+        status = self.query_one(StatusBar)
+        if interval <= 0:
+            status.mark_quotes_disabled()
+            return
+        # Fire one poll immediately, then schedule the recurring tick.
+        self.run_worker(self._poll_quotes(), name="quote_poll", exclusive=False)
+        self.set_interval(interval, self._schedule_quote_poll)
+
+    def _schedule_quote_poll(self) -> None:
+        """Fire-and-forget the polling worker on each tick of the timer."""
+        self.run_worker(self._poll_quotes(), name="quote_poll", exclusive=False)
+
+    async def _poll_quotes(self) -> None:
+        """Fetch fresh prices for the visible rows and update the table.
+
+        Polls the rows currently visible in the DataTable, padded above
+        and below by :attr:`QUOTE_POLL_VIEWPORT_PADDING` so a quick
+        scroll/jump lands on already-fresh prices. Hard-capped at
+        :attr:`QUOTE_POLL_TICKER_CAP` to protect against extra-tall
+        terminals. Each poll is independent — failures are silent and
+        the next tick simply tries again. On success the status bar's
+        "Quotes" marker is updated so the user sees the freshness lag.
+        """
+        if self._result is None or not self._result.candidates:
+            return
+        tickers = self._tickers_to_poll()
+        if not tickers:
+            return
+        try:
+            quotes = await self._providers.quotes.fetch_quotes(tickers)
+        except Exception:
+            return
+        if not quotes:
+            return
+        for ticker, quote in quotes.items():
+            self._quote_overrides[ticker] = quote.price_usd
+        self._apply_quote_overrides_to_table(quotes)
+        # Refresh the detail pane if the focused row's price moved — the
+        # detail pane reads from the candidate snapshot otherwise, missing
+        # the override.
+        if self._focused_ticker() in quotes:
+            row_index = self._focused_row_index()
+            if row_index is not None:
+                self._render_detail(row_index)
+
+        latest = max((q.fetched_at for q in quotes.values()), default=None)
+        self.query_one(StatusBar).mark_quote_polled(latest)
+
+    def _tickers_to_poll(self) -> list[str]:
+        """Return the candidate tickers to refresh on the next poll cycle.
+
+        Reads the DataTable's current scroll position, computes which
+        candidate rows are inside the visible window (plus padding), and
+        always includes the cursor's row so the focused detail pane
+        stays fresh regardless of scroll. Capped at
+        :attr:`QUOTE_POLL_TICKER_CAP` to protect against extra-tall
+        terminals or huge viewports.
+        """
+        if self._result is None or not self._result.candidates:
+            return []
+        first, last = self._visible_row_range()
+        return _select_tickers_to_poll(
+            self._result.candidates,
+            visible_first=first,
+            visible_last=last,
+            cursor=self._focused_row_index(),
+            padding=self.QUOTE_POLL_VIEWPORT_PADDING,
+            cap=self.QUOTE_POLL_TICKER_CAP,
+        )
+
+    def _visible_row_range(self) -> tuple[int, int]:
+        """Return (first, last) row indices currently rendered in the viewport.
+
+        Last is exclusive — i.e., ``range(first, last)`` enumerates the
+        rows on screen. Falls back to a 0-row range when the DataTable
+        isn't mounted yet (early ticks during composition).
+        """
+        try:
+            table = self.query_one("#candidates", DataTable)
+        except Exception:
+            return (0, 0)
+        scroll_y = int(table.scroll_y)
+        # Subtract one for the column-header row that always sits on top.
+        visible_height = max(0, table.size.height - 1)
+        return (scroll_y, scroll_y + visible_height)
+
+    def _apply_quote_overrides_to_table(self, quotes: Mapping[str, object]) -> None:
+        """Update the price cell of every row whose ticker has a fresh quote.
+
+        Uses ``update_cell_at`` with row keys equal to the ticker (set in
+        :meth:`_render_table`) so reordering/filtering doesn't desync the
+        cell coordinates.
+        """
+        if self._result is None:
+            return
+        table = self.query_one("#candidates", DataTable)
+        for row_index, candidate in enumerate(self._result.candidates):
+            ticker = candidate.instrument.ticker
+            if ticker not in quotes:
+                continue
+            price = self._quote_overrides.get(ticker)
+            if price is None:
+                continue
+            try:
+                table.update_cell_at(
+                    Coordinate(row_index, self.PRICE_COLUMN_INDEX),
+                    _format_price(price),
+                )
+            except Exception:
+                continue
+
+    def _focused_ticker(self) -> str | None:
+        """Return the ticker of the cursor's row, or ``None`` if no focus."""
+        if self._result is None or not self._result.candidates:
+            return None
+        idx = self._focused_row_index()
+        if idx is None:
+            return None
+        return self._result.candidates[idx].instrument.ticker
+
+    def _focused_row_index(self) -> int | None:
+        """Return the cursor's row index, or ``None`` if the table is empty."""
+        if self._result is None or not self._result.candidates:
+            return None
+        try:
+            table = self.query_one("#candidates", DataTable)
+        except Exception:
+            return None
+        cursor = table.cursor_row
+        if cursor < 0 or cursor >= len(self._result.candidates):
+            return None
+        return cursor
 
     def refresh_results(self) -> None:
         """Re-run the active screen and repaint stats, table, and detail pane."""
@@ -247,11 +442,15 @@ class ScreenerScreen(Screen[None]):
     def _row_for(self, index: int, candidate: Candidate) -> tuple[str | Text, ...]:
         snap = candidate.snapshot
         verdict_text = Text(candidate.verdict.value, style=VERDICT_STYLES[candidate.verdict])
+        # Prefer the polled-quote override if we have one — keeps the
+        # initial paint consistent with whatever the polling loop has
+        # already fetched, instead of flashing the snapshot price first.
+        price = self._quote_overrides.get(candidate.instrument.ticker, snap.price_usd)
         return (
             f"{index:02d}",
             candidate.instrument.ticker,
             candidate.instrument.name,
-            _format_price(snap.price_usd),
+            _format_price(price),
             _format_market_cap(snap.market_cap_usd),
             _format_signed_pct(snap.revenue_growth_pct),
             _format_pct(snap.gross_margin_pct),
@@ -277,11 +476,15 @@ class ScreenerScreen(Screen[None]):
         # Position indicator — useful when the candidate list is thousands long.
         position = f"[dim]{row_index + 1:,}/{len(self._result.candidates):,}[/dim]  "
         fit_pct = compute_style_fit(snap, self._screen)
+        # Prefer the latest polled price if we have one; this is what's
+        # already showing in the table column, so keeping the detail pane
+        # consistent prevents "$35.37 in the table, $34.91 in the pane".
+        price = self._quote_overrides.get(c.instrument.ticker, snap.price_usd)
         body.update(
             f"{position}[b cyan]{c.instrument.ticker}[/b cyan]  {c.instrument.name}\n"
             f"[dim]{c.instrument.sector or '—'}  ·  {c.instrument.exchange or '—'}[/dim]\n"
             f"\n"
-            f"Price           {_format_price(snap.price_usd):>12}\n"
+            f"Price           {_format_price(price):>12}\n"
             f"Mkt cap         {_format_market_cap(snap.market_cap_usd):>12}\n"
             f"Rev growth      {_format_signed_pct(snap.revenue_growth_pct):>12}\n"
             f"Gross margin    {_format_pct(snap.gross_margin_pct):>12}\n"

@@ -121,6 +121,24 @@ class ScreenResult:
 
 
 @dataclass(frozen=True, slots=True)
+class Quote:
+    """Latest price quote for a ticker.
+
+    Returned by :class:`~openbourse.providers.base.QuoteProvider`.
+    Distinct from :class:`FundamentalsSnapshot` — quotes refresh on the
+    seconds-to-minutes timescale; snapshots refresh on the
+    weeks-to-quarters timescale. Keeping them separate lets the UI tick
+    the price column without re-running the (expensive) snapshot
+    pipeline.
+    """
+
+    ticker: str
+    price_usd: float
+    fetched_at: datetime
+    volume: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ConcernFinding:
     """One row of "user-defined concern checked against this candidate".
 

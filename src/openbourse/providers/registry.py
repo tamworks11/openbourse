@@ -26,10 +26,16 @@ from openbourse.providers.base import (
     FilingsProvider,
     FundamentalsProvider,
     Providers,
+    QuoteProvider,
 )
 from openbourse.providers.claude import ClaudeBriefProvider, StubBriefProvider
 from openbourse.providers.edgar import EdgarFilingsProvider, StubFilingsProvider
 from openbourse.providers.fmp import FmpFundamentalsProvider, StubFundamentalsProvider
+from openbourse.providers.quotes import (
+    FmpQuoteProvider,
+    StubQuoteProvider,
+    YfinanceQuoteProvider,
+)
 from openbourse.providers.scanner import ClaudeConcernScanner, StubConcernScanner
 from openbourse.providers.yfinance import YfinanceFundamentalsProvider
 
@@ -47,26 +53,31 @@ def build_providers(settings: Settings | None = None) -> Providers:
             filings=StubFilingsProvider(),
             brief=StubBriefProvider(),
             scanner=StubConcernScanner(),
+            quotes=StubQuoteProvider(),
             fundamentals_mode="stub",
             filings_mode="stub",
             brief_mode="stub",
             scanner_mode="stub",
+            quotes_mode="stub",
         )
 
     fundamentals, fundamentals_mode = _build_fundamentals(settings)
     filings, filings_mode = _build_filings(settings)
     brief, brief_mode = _build_brief(settings)
     scanner, scanner_mode = _build_scanner(settings)
+    quotes, quotes_mode = _build_quotes(settings)
 
     return Providers(
         fundamentals=fundamentals,
         filings=filings,
         brief=brief,
         scanner=scanner,
+        quotes=quotes,
         fundamentals_mode=fundamentals_mode,
         filings_mode=filings_mode,
         brief_mode=brief_mode,
         scanner_mode=scanner_mode,
+        quotes_mode=quotes_mode,
     )
 
 
@@ -123,3 +134,26 @@ def _build_scanner(settings: Settings) -> tuple[ConcernScanner, str]:
             "live",
         )
     return StubConcernScanner(), "stub"
+
+
+def _build_quotes(settings: Settings) -> tuple[QuoteProvider, str]:
+    """Pick a quote provider based on the configured fundamentals provider.
+
+    Quotes are tied to the fundamentals choice for two reasons: (1) the
+    cheapest live source is whichever vendor the user has already
+    credentialed, and (2) keeping the two consistent avoids "fundamentals
+    say $20, quotes say $35" mismatches across data vendors. FMP's batch
+    endpoint is preferred when the key is present; otherwise we use
+    yfinance which has no auth requirement.
+    """
+    choice = (settings.fundamentals_provider or "yfinance").lower()
+    if choice == "stub":
+        return StubQuoteProvider(), "stub"
+
+    if choice == "fmp":
+        fmp_key = settings.fmp_api_key.get_secret_value() if settings.fmp_api_key else ""
+        if fmp_key:
+            return FmpQuoteProvider(fmp_key), "fmp"
+        # FMP fundamentals chosen but no key — fall through to yfinance for
+        # quotes rather than silently going to stub.
+    return YfinanceQuoteProvider(), "yfinance"

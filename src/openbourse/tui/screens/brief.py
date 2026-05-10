@@ -9,7 +9,7 @@ from typing import ClassVar
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from textual.app import ComposeResult
 from textual.binding import BindingType
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Footer, LoadingIndicator, Static
 
@@ -162,7 +162,7 @@ class BriefScreen(Screen[None]):
         # screen alongside the price chart and 2x2 fundamentals grid
         # without forcing the user to scroll.
         with Horizontal(id="brief-main"):
-            with Vertical(id="brief-left"):
+            with VerticalScroll(id="brief-left"):
                 # Price chart: the right column eats ~half the terminal,
                 # so the chart gets ~half the previous width. The widget
                 # auto-recomputes on render based on its actual size.
@@ -327,7 +327,7 @@ class BriefScreen(Screen[None]):
         await old.remove()
         # Mount the populated chart at the top of the left column so it
         # ends up in the same slot the placeholder occupied.
-        left = self.query_one("#brief-left", Vertical)
+        left = self.query_one("#brief-left", VerticalScroll)
         await left.mount(
             PriceChart(self._candidate.instrument.ticker, points, chart_width=70),
             before=self.query_one(HistoryCharts),
@@ -502,7 +502,7 @@ class BriefScreen(Screen[None]):
         # user sees populated charts without having to back out.
         old = self.query_one(HistoryCharts)
         await old.remove()
-        left = self.query_one("#brief-left", Vertical)
+        left = self.query_one("#brief-left", VerticalScroll)
         await left.mount(HistoryCharts(self._history))
         self.app.notify(
             f"Loaded {len(history)} history points for {ticker}.",

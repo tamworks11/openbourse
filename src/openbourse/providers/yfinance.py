@@ -33,7 +33,7 @@ from datetime import date
 from typing import Any
 
 import pandas as pd  # type: ignore[import-untyped]
-import yfinance as yf  # type: ignore[import-untyped]
+import yfinance as yf
 
 from openbourse.domain import FundamentalsSnapshot, Instrument
 

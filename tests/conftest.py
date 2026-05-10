@@ -16,6 +16,7 @@ from openbourse.providers.base import Providers
 from openbourse.providers.claude import StubBriefProvider
 from openbourse.providers.edgar import StubFilingsProvider
 from openbourse.providers.fmp import StubFundamentalsProvider
+from openbourse.providers.quotes import StubQuoteProvider
 from openbourse.providers.scanner import StubConcernScanner
 
 
@@ -107,8 +108,10 @@ def stub_providers() -> Providers:
         filings=StubFilingsProvider(),
         brief=StubBriefProvider(),
         scanner=StubConcernScanner(),
+        quotes=StubQuoteProvider(),
         fundamentals_mode="stub",
         filings_mode="stub",
         brief_mode="stub",
         scanner_mode="stub",
+        quotes_mode="stub",
     )

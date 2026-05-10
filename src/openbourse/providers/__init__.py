@@ -15,10 +15,16 @@ from openbourse.providers.base import (
     FilingsProvider,
     FundamentalsProvider,
     Providers,
+    QuoteProvider,
 )
 from openbourse.providers.claude import ClaudeBriefProvider, StubBriefProvider
 from openbourse.providers.edgar import EdgarFilingsProvider, StubFilingsProvider
 from openbourse.providers.fmp import FmpFundamentalsProvider, StubFundamentalsProvider
+from openbourse.providers.quotes import (
+    FmpQuoteProvider,
+    StubQuoteProvider,
+    YfinanceQuoteProvider,
+)
 from openbourse.providers.registry import build_providers
 from openbourse.providers.scanner import ClaudeConcernScanner, StubConcernScanner
 from openbourse.providers.yfinance import YfinanceFundamentalsProvider
@@ -32,12 +38,16 @@ __all__ = [
     "Filing",
     "FilingsProvider",
     "FmpFundamentalsProvider",
+    "FmpQuoteProvider",
     "FundamentalsProvider",
     "Providers",
+    "QuoteProvider",
     "StubBriefProvider",
     "StubConcernScanner",
     "StubFilingsProvider",
     "StubFundamentalsProvider",
+    "StubQuoteProvider",
     "YfinanceFundamentalsProvider",
+    "YfinanceQuoteProvider",
     "build_providers",
 ]

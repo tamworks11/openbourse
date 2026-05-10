@@ -49,6 +49,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (30-60), red for high (≥60). Same colouring is applied to the `Risk N`
   value in the detail pane and brief header for consistency, so the user
   can scan the screener for high-risk outliers at a glance.
+- **Polled live quotes** — new `QuoteProvider` protocol with stub,
+  yfinance (parallel `fast_info`), and FMP (batched `/quote?symbols=…`)
+  implementations. The screener fires a background poll every
+  `OPENBOURSE_QUOTE_REFRESH_SECONDS` (default 60s, set 0 to disable)
+  and updates the `PRICE` cell in place via `update_cell_at` — no full
+  repaint, no detail-pane flicker. Status bar grows a "Quotes · 12s
+  ago / off" indicator that ticks every second so freshness is always
+  visible. The polled value also flows into the detail pane so the
+  focused row stays consistent.
+- **Viewport-aware polling** — the polling loop now refreshes the rows
+  currently visible in the table (plus a 20-row buffer above and below)
+  rather than just the top 100 by score. Scrolling into row 500 of a
+  1000-name universe gets fresh quotes on the next poll cycle instead
+  of staying stuck at snapshot prices. Hard-capped at 100 tickers per
+  cycle to protect against extra-tall terminals or huge universes.
+
 ### Changed
 
 - **yfinance history default 4 → 8 years** — the small fundamentals

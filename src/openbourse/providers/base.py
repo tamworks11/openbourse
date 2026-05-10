@@ -16,7 +16,13 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Protocol, runtime_checkable
 
-from openbourse.domain import AiBrief, ConcernFinding, FundamentalsSnapshot, Instrument
+from openbourse.domain import (
+    AiBrief,
+    ConcernFinding,
+    FundamentalsSnapshot,
+    Instrument,
+    Quote,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +119,29 @@ class BriefProvider(Protocol):
 
 
 @runtime_checkable
+class QuoteProvider(Protocol):
+    """Fetches latest price quotes for one or more tickers.
+
+    Distinct from :class:`FundamentalsProvider` — quotes refresh on the
+    seconds-to-minutes timescale and only carry price/volume, while
+    fundamentals refresh on the weeks-to-quarters timescale and carry
+    the full snapshot. Splitting them lets the TUI tick the price column
+    independently of the (expensive) full snapshot pipeline.
+    """
+
+    async def fetch_quotes(self, tickers: list[str]) -> dict[str, Quote]:
+        """Return latest :class:`Quote` keyed by ticker.
+
+        Tickers without a quote are simply omitted from the dict — the
+        caller treats absence as "no fresh data" and keeps the previous
+        value. Implementations should batch when the upstream supports
+        it (e.g., FMP's comma-separated multi-symbol endpoint) and run
+        sequential per-ticker fetches in parallel otherwise.
+        """
+        ...
+
+
+@runtime_checkable
 class ConcernScanner(Protocol):
     """Scans 10-K filing text for evidence of user-defined concerns.
 
@@ -155,10 +184,12 @@ class Providers:
     filings: FilingsProvider
     brief: BriefProvider
     scanner: ConcernScanner
+    quotes: QuoteProvider
     fundamentals_mode: str = field(default="stub")
     filings_mode: str = field(default="stub")
     brief_mode: str = field(default="stub")
     scanner_mode: str = field(default="stub")
+    quotes_mode: str = field(default="stub")
 
     @property
     def using_stubs(self) -> bool:
@@ -168,6 +199,7 @@ class Providers:
             and self.filings_mode == "stub"
             and self.brief_mode == "stub"
             and self.scanner_mode == "stub"
+            and self.quotes_mode == "stub"
         )
 
     @property
@@ -178,4 +210,5 @@ class Providers:
             and self.filings_mode == "live"
             and self.brief_mode == "live"
             and self.scanner_mode == "live"
+            and self.quotes_mode == "live"
         )

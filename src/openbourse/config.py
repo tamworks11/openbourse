@@ -46,6 +46,14 @@ class Settings(BaseSettings):
         description="Master kill-switch — when true every provider becomes a stub.",
     )
 
+    quote_refresh_seconds: int = Field(
+        default=60,
+        description=(
+            "How often the screener polls the quote provider (seconds). "
+            "Set to 0 to disable polling entirely."
+        ),
+    )
+
     log_level: str = "INFO"
 
 

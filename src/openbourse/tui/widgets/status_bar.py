@@ -25,6 +25,11 @@ class StatusBar(Horizontal):
         self._screen_path = screen_path
         self._left = Static("", classes="left", id="status-left")
         self._right = Static("", classes="right", id="status-right")
+        # Last successful quote-poll timestamp, surfaced as "Quotes · 12s ago".
+        # ``None`` means no successful poll yet (or polling disabled); the
+        # marker shows "off" in that case.
+        self._last_quote_at: datetime | None = None
+        self._quotes_disabled: bool = False
 
     def compose(self) -> Iterable[Static]:
         """Yield the left (title/path) and right (providers/clock) halves."""
@@ -50,12 +55,47 @@ class StatusBar(Horizontal):
         self._screen_path = path
         self._refresh_text()
 
+    def mark_quote_polled(self, when: datetime | None) -> None:
+        """Record a successful (or failed) poll timestamp.
+
+        ``when=None`` indicates polling is disabled — the status marker
+        renders "Quotes off" so users know the price column won't tick
+        without manual refresh. Otherwise the marker shows the elapsed
+        time since the last successful poll.
+        """
+        self._last_quote_at = when
+        self._refresh_text()
+
+    def mark_quotes_disabled(self) -> None:
+        """Latch the "Quotes off" state so subsequent ticks don't reset it."""
+        self._quotes_disabled = True
+        self._last_quote_at = None
+        self._refresh_text()
+
     def _provider_marker(self) -> str:
         return (
             f"● FMP {self._providers.fundamentals_mode}  "
             f"● EDGAR {self._providers.filings_mode}  "
-            f"● Claude {self._providers.brief_mode}"
+            f"● Claude {self._providers.brief_mode}  "
+            f"● {self._quote_marker()}"
         )
+
+    def _quote_marker(self) -> str:
+        """Render the right-most "Quotes · …" indicator."""
+        if self._quotes_disabled:
+            return "Quotes off"
+        if self._last_quote_at is None:
+            return "Quotes …"
+        elapsed = (self.now - self._last_quote_at).total_seconds()
+        if elapsed < 0:
+            elapsed = 0
+        if elapsed < 60:
+            label = f"{int(elapsed)}s ago"
+        elif elapsed < 3600:
+            label = f"{int(elapsed // 60)}m ago"
+        else:
+            label = f"{int(elapsed // 3600)}h ago"
+        return f"Quotes · {label}"
 
     def _refresh_text(self) -> None:
         timestamp = self.now.strftime("%Y-%m-%d %H:%M:%S")
