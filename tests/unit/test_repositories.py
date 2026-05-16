@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from openbourse.db.repositories import (
     FundamentalsRepository,
     InstrumentRepository,
+    SyncRunRepository,
     WatchlistRepository,
 )
 from openbourse.domain import FundamentalsSnapshot, Instrument
@@ -91,6 +92,7 @@ async def test_fundamentals_upsert_persists_all_metric_fields(
         price_usd=42.50,
         revenue_ttm_usd=5.4e9,
         ebitda_ttm_usd=1.8e9,
+        pe_ratio_ttm=28.4,
         roic_pct=22.7,
     )
     await fund_repo.upsert(inst_row.id, written)
@@ -101,6 +103,7 @@ async def test_fundamentals_upsert_persists_all_metric_fields(
     # Spot-check every field — anything dropped here will silently
     # break a downstream chart, so the round-trip is the right gate.
     assert read.roic_pct == 22.7
+    assert read.pe_ratio_ttm == 28.4
     assert read.price_usd == 42.50
     assert read.revenue_ttm_usd == 5.4e9
     assert read.ebitda_ttm_usd == 1.8e9
@@ -182,3 +185,54 @@ async def test_watchlist_add_remove_list(db_session: AsyncSession) -> None:
     assert await repo.list_tickers() == ["VEEV"]
 
     assert await repo.remove("NOPE") is False
+
+
+async def test_sync_run_latest_returns_none_on_empty_db(db_session: AsyncSession) -> None:
+    assert await SyncRunRepository(db_session).latest() is None
+
+
+async def test_sync_run_record_and_latest_round_trip(db_session: AsyncSession) -> None:
+    repo = SyncRunRepository(db_session)
+    recorded = await repo.record(
+        sources=["sp500", "nasdaq100"],
+        ticker_count=600,
+        ingested=595,
+        failed=5,
+    )
+    await db_session.commit()
+
+    latest = await repo.latest()
+    assert latest is not None
+    assert latest.synced_at == recorded.synced_at
+    assert latest.sources == ["sp500", "nasdaq100"]
+    assert latest.ticker_count == 600
+    assert latest.ingested == 595
+    assert latest.failed == 5
+
+
+async def test_sync_run_latest_is_utc_aware(db_session: AsyncSession) -> None:
+    # SQLite hands back a naive datetime for a timezone=True column; the
+    # repository must re-attach UTC so freshness math is unambiguous.
+    repo = SyncRunRepository(db_session)
+    await repo.record(sources=["dow30"], ticker_count=30, ingested=30, failed=0)
+    await db_session.commit()
+
+    latest = await repo.latest()
+    assert latest is not None
+    assert latest.synced_at.tzinfo is not None
+    assert latest.synced_at.utcoffset().total_seconds() == 0  # type: ignore[union-attr]
+
+
+async def test_sync_run_latest_returns_most_recent(db_session: AsyncSession) -> None:
+    repo = SyncRunRepository(db_session)
+    await repo.record(sources=["sp500"], ticker_count=500, ingested=500, failed=0)
+    await db_session.commit()
+    await repo.record(sources=["dow30"], ticker_count=30, ingested=28, failed=2)
+    await db_session.commit()
+
+    latest = await repo.latest()
+    assert latest is not None
+    # The second run is the most recent — record() stamps datetime.now(UTC).
+    assert latest.sources == ["dow30"]
+    assert latest.ticker_count == 30
+    assert latest.ingested == 28

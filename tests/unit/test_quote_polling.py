@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 
-from openbourse.domain import Candidate, FundamentalsSnapshot, Instrument, Verdict
-from openbourse.tui.screens.screener import _select_tickers_to_poll
+from openbourse.domain import Candidate, FundamentalsSnapshot, Instrument, Quote, Verdict
+from openbourse.tui.screens.screener import (
+    _detail_row,
+    _format_change,
+    _format_pe,
+    _format_signed_pct_opt,
+    _format_volume,
+    _select_tickers_to_poll,
+)
 
 
 def _candidate(ticker: str) -> Candidate:
@@ -117,3 +124,109 @@ class TestSelectTickersToPoll:
         )
         # Empty visible window; only the cursor's row should land in the result.
         assert out == ["T0042"]
+
+
+class TestFormatVolume:
+    def test_none_renders_as_em_dash(self) -> None:
+        assert _format_volume(None) == "—"
+
+    def test_billions(self) -> None:
+        assert _format_volume(1_400_000_000) == "1.40B"
+
+    def test_millions(self) -> None:
+        assert _format_volume(12_300_000) == "12.3M"
+
+    def test_thousands(self) -> None:
+        assert _format_volume(850_000) == "850K"
+
+    def test_thousands_boundary_rounds_to_k(self) -> None:
+        assert _format_volume(1_234) == "1K"
+
+    def test_sub_thousand_renders_plain(self) -> None:
+        assert _format_volume(999) == "999"
+        assert _format_volume(0) == "0"
+
+
+class TestVolumeColumn:
+    def test_row_has_one_cell_per_column(self, stub_providers: object) -> None:
+        from openbourse.tui.screens.screener import COLUMNS, ScreenerScreen
+
+        screen = ScreenerScreen(providers=stub_providers)  # type: ignore[arg-type]
+        row = screen._row_for(1, _candidate("AAPL"))
+        assert len(row) == len(COLUMNS)
+
+    def test_volume_cell_sits_at_volume_column_index(self, stub_providers: object) -> None:
+        from openbourse.tui.screens.screener import COLUMNS, ScreenerScreen
+
+        # The constant must point at the "VOLUME" header...
+        assert COLUMNS[ScreenerScreen.VOLUME_COLUMN_INDEX] == "VOLUME"
+
+        screen = ScreenerScreen(providers=stub_providers)  # type: ignore[arg-type]
+        screen._latest_quotes["AAPL"] = Quote(
+            ticker="AAPL",
+            price_usd=190.0,
+            fetched_at=datetime.now(UTC),
+            volume=12_300_000,
+        )
+        row = screen._row_for(1, _candidate("AAPL"))
+        # ...and the formatted volume must land in that cell.
+        assert row[ScreenerScreen.VOLUME_COLUMN_INDEX] == "12.3M"
+
+    def test_volume_cell_is_em_dash_before_any_poll(self, stub_providers: object) -> None:
+        from openbourse.tui.screens.screener import ScreenerScreen
+
+        screen = ScreenerScreen(providers=stub_providers)  # type: ignore[arg-type]
+        row = screen._row_for(1, _candidate("MSFT"))
+        assert row[ScreenerScreen.VOLUME_COLUMN_INDEX] == "—"
+
+
+class TestFormatChange:
+    def test_none_renders_as_em_dash(self) -> None:
+        assert _format_change(None) == "—"
+
+    def test_positive_change_is_signed(self) -> None:
+        assert _format_change(2.34) == "+$2.34"
+
+    def test_negative_change_is_signed(self) -> None:
+        assert _format_change(-1.05) == "-$1.05"
+
+    def test_zero_change_renders_as_positive(self) -> None:
+        assert _format_change(0.0) == "+$0.00"
+
+
+class TestFormatSignedPctOpt:
+    def test_none_renders_as_em_dash(self) -> None:
+        assert _format_signed_pct_opt(None) == "—"
+
+    def test_positive_is_signed(self) -> None:
+        assert _format_signed_pct_opt(18.4) == "+18.4%"
+
+    def test_negative_is_signed(self) -> None:
+        assert _format_signed_pct_opt(-3.2) == "-3.2%"
+
+
+class TestFormatPe:
+    def test_none_renders_as_em_dash(self) -> None:
+        assert _format_pe(None) == "—"
+
+    def test_positive_pe_to_one_decimal(self) -> None:
+        assert _format_pe(28.43) == "28.4"
+
+    def test_non_positive_pe_renders_as_em_dash(self) -> None:
+        # A negative trailing P/E (loss-making TTM) is not a usable ratio.
+        assert _format_pe(-12.0) == "—"
+        assert _format_pe(0.0) == "—"
+
+
+class TestDetailRow:
+    def test_two_pairs_both_appear(self) -> None:
+        line = _detail_row(("Price", "$10.00"), ("Volume", "1.2M"))
+        assert "Price" in line
+        assert "$10.00" in line
+        assert "Volume" in line
+        assert "1.2M" in line
+
+    def test_single_pair_omits_the_second_cell(self) -> None:
+        line = _detail_row(("FCF yield", "2.8%"), None)
+        assert line.startswith("FCF yield")
+        assert line.rstrip().endswith("2.8%")

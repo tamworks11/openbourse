@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from openbourse.providers.base import Providers
 from openbourse.universe import (
     DEFAULT_BUNDLED_LIST,
+    DEFAULT_SYNC_SOURCES,
     IngestSummary,
+    force_sync_universe,
     ingest_tickers,
     load_bundled_list,
     load_tickers,
@@ -157,6 +159,138 @@ class TestIngestPipeline:
         )
         assert [t for t, _, _ in seen] == ["CDNS", "VEEV", "ANET"]
         assert seen[0][2] == 3  # total
+
+
+class TestForceSync:
+    async def test_force_sync_unions_and_dedupes_sources(
+        self, sqlite_engine: AsyncEngine, stub_providers: Providers
+    ) -> None:
+        factory = async_sessionmaker(sqlite_engine, expire_on_commit=False)
+        fake_lists = {
+            "sp500": ["CDNS", "VEEV"],
+            "nasdaq100": ["VEEV", "ANET"],  # VEEV overlaps sp500
+        }
+
+        result = await force_sync_universe(
+            stub_providers,
+            factory,
+            sources=["sp500", "nasdaq100"],
+            rate_limit_seconds=0.0,
+            source_fetcher=lambda name: fake_lists[name],
+        )
+
+        assert result.sources == {"sp500": 2, "nasdaq100": 2}
+        assert result.source_errors == []
+        # CDNS, VEEV, ANET — VEEV counted once.
+        assert result.unique_tickers == 3
+        assert result.ingest.ingested == 3
+
+        from openbourse.db.repositories import FundamentalsRepository
+
+        async with factory() as session:
+            pairs = await FundamentalsRepository(session).latest_for_all()
+        assert {t for (inst, _) in pairs for t in [inst.ticker]} == {
+            "CDNS",
+            "VEEV",
+            "ANET",
+        }
+
+    async def test_force_sync_records_failed_source_and_continues(
+        self, sqlite_engine: AsyncEngine, stub_providers: Providers
+    ) -> None:
+        factory = async_sessionmaker(sqlite_engine, expire_on_commit=False)
+
+        def _fetcher(name: str) -> list[str]:
+            if name == "broken":
+                raise RuntimeError("Wikipedia layout changed")
+            return ["CDNS"]
+
+        result = await force_sync_universe(
+            stub_providers,
+            factory,
+            sources=["sp500", "broken"],
+            rate_limit_seconds=0.0,
+            source_fetcher=_fetcher,
+        )
+
+        assert result.sources == {"sp500": 1}
+        assert len(result.source_errors) == 1
+        assert result.source_errors[0][0] == "broken"
+        assert "Wikipedia layout changed" in result.source_errors[0][1]
+        # The healthy source still synced.
+        assert result.ingest.ingested == 1
+
+    async def test_force_sync_ignores_snapshot_freshness(
+        self, sqlite_engine: AsyncEngine, stub_providers: Providers
+    ) -> None:
+        factory = async_sessionmaker(sqlite_engine, expire_on_commit=False)
+        # Pre-populate with a fresh snapshot.
+        await ingest_tickers(["CDNS"], stub_providers, factory, rate_limit_seconds=0.0)
+
+        # Force sync must re-ingest anyway — never skip on freshness.
+        result = await force_sync_universe(
+            stub_providers,
+            factory,
+            sources=["sp500"],
+            rate_limit_seconds=0.0,
+            source_fetcher=lambda name: ["CDNS"],
+        )
+        assert result.ingest.skipped_fresh == 0
+        assert result.ingest.ingested == 1
+
+    async def test_force_sync_records_a_sync_run(
+        self, sqlite_engine: AsyncEngine, stub_providers: Providers
+    ) -> None:
+        factory = async_sessionmaker(sqlite_engine, expire_on_commit=False)
+        result = await force_sync_universe(
+            stub_providers,
+            factory,
+            sources=["sp500"],
+            rate_limit_seconds=0.0,
+            source_fetcher=lambda name: ["CDNS", "VEEV"],
+        )
+
+        assert result.synced_at is not None
+
+        from openbourse.db.repositories import SyncRunRepository
+
+        async with factory() as session:
+            latest = await SyncRunRepository(session).latest()
+        assert latest is not None
+        assert latest.synced_at == result.synced_at
+        assert latest.synced_at.tzinfo is not None  # UTC-aware on read-back
+        assert latest.sources == ["sp500"]
+        assert latest.ticker_count == 2
+        assert latest.ingested == 2
+
+    async def test_force_sync_skips_recording_when_nothing_ingested(
+        self, sqlite_engine: AsyncEngine, stub_providers: Providers
+    ) -> None:
+        factory = async_sessionmaker(sqlite_engine, expire_on_commit=False)
+        # Every ticker is unknown to the provider — nothing lands in the DB.
+        result = await force_sync_universe(
+            stub_providers,
+            factory,
+            sources=["sp500"],
+            rate_limit_seconds=0.0,
+            source_fetcher=lambda name: ["ZZZZ"],
+        )
+
+        assert result.ingest.ingested == 0
+        assert result.synced_at is None  # no data refreshed → not recorded
+
+        from openbourse.db.repositories import SyncRunRepository
+
+        async with factory() as session:
+            latest = await SyncRunRepository(session).latest()
+        assert latest is None
+
+    def test_default_sync_sources_are_known(self) -> None:
+        from openbourse.universe import KNOWN_SOURCES
+
+        assert DEFAULT_SYNC_SOURCES == ("sp500", "nasdaq100", "dow30")
+        for name in DEFAULT_SYNC_SOURCES:
+            assert name in KNOWN_SOURCES
 
 
 class TestSources:

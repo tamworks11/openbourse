@@ -14,6 +14,7 @@ from openbourse.db.models import (
     InstrumentRow,
     ScreenRow,
     ScreenRunRow,
+    SyncRunRow,
     WatchlistRow,
 )
 
@@ -25,6 +26,7 @@ __all__ = [
     "InstrumentRow",
     "ScreenRow",
     "ScreenRunRow",
+    "SyncRunRow",
     "WatchlistRow",
     "create_engine_from_url",
     "dispose_engine",

@@ -78,6 +78,9 @@ class FundamentalsRow(Base):
     price_usd: Mapped[float | None] = mapped_column(Float)
     revenue_ttm_usd: Mapped[float | None] = mapped_column(Float)
     ebitda_ttm_usd: Mapped[float | None] = mapped_column(Float)
+    # Trailing-twelve-month P/E. Nullable — None means the provider had
+    # no usable figure (missing or non-positive earnings).
+    pe_ratio_ttm: Mapped[float | None] = mapped_column(Float)
     # Return on invested capital, in percent. Default 0 stands in for
     # "provider couldn't compute" so existing rows from before this
     # column landed read back as 0 and the ROIC chart treats them as
@@ -135,6 +138,28 @@ class WatchlistRow(Base):
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class SyncRunRow(Base):
+    """Audit record of a full universe force-sync (``bourse universe sync``).
+
+    One row per successful sync. The most recent ``synced_at`` answers
+    "when was the database last refreshed from the data provider?" —
+    surfaced in the TUI status bar and the CLI.
+    """
+
+    __tablename__ = "sync_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Stored explicitly as a UTC-aware datetime by the writer rather than
+    # relying on a server default, so the value is consistent across the
+    # SQLite (offline) and Postgres backends.
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # The index sources fetched, e.g. ["sp500", "nasdaq100", "dow30"].
+    sources: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    ticker_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    ingested: Mapped[int] = mapped_column(Integer, nullable=False)
+    failed: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class AiBriefRow(Base):

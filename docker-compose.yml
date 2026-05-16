@@ -18,5 +18,32 @@ services:
       timeout: 5s
       retries: 5
 
+  scheduler:
+    # Pre-market universe sync. Opt-in — it only starts when you ask for the
+    # `scheduler` profile:
+    #   docker compose --profile scheduler up -d
+    # Plain `docker compose up -d postgres` is unaffected.
+    profiles: ["scheduler"]
+    build: .
+    image: openbourse:local
+    container_name: openbourse-scheduler
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Reach Postgres over the compose network — the container's internal
+      # 5432, not the host-mapped 5433. This overrides any value in .env.
+      OPENBOURSE_DATABASE_URL: postgresql+asyncpg://openbourse:openbourse@postgres:5432/openbourse
+      # Hour/minute (US Eastern) to run the sync. 09:00 ET is 30 minutes
+      # before the 09:30 open. Override via .env for a different lead time.
+      OPENBOURSE_SYNC_HOUR: "${OPENBOURSE_SYNC_HOUR:-9}"
+      OPENBOURSE_SYNC_MINUTE: "${OPENBOURSE_SYNC_MINUTE:-0}"
+    env_file:
+      # Pulls through provider credentials (FMP/Claude) when present.
+      # Optional so a fresh checkout without a .env still starts.
+      - path: .env
+        required: false
+    restart: unless-stopped
+
 volumes:
   openbourse-pg-data:

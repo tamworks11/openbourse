@@ -79,3 +79,43 @@ def test_lookup_json_output_is_machine_readable() -> None:
     assert payload["instrument"]["ticker"] == "CDNS"
     assert "score" in payload
     assert "verdict" in payload
+
+
+def test_universe_sync_command_is_registered() -> None:
+    result = runner.invoke(app, ["universe", "sync", "--help"])
+    assert result.exit_code == 0
+    # The default sources are listed in the --source help text.
+    assert "sp500" in result.stdout
+    assert "nasdaq100" in result.stdout
+
+
+def test_universe_sync_rejects_unknown_source() -> None:
+    # Validation happens before any network call, so this is a pure unit test.
+    result = runner.invoke(app, ["universe", "sync", "--source", "not_a_real_index"])
+    assert result.exit_code != 0
+    assert "unknown source" in result.output.lower()
+
+
+def test_run_command_exposes_sync_flag() -> None:
+    result = runner.invoke(app, ["run", "--help"])
+    assert result.exit_code == 0
+    assert "--sync" in result.stdout
+
+
+def test_alembic_config_resolves_ini_and_url(monkeypatch) -> None:
+    from pathlib import Path
+
+    monkeypatch.setenv("OPENBOURSE_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    from openbourse import config
+
+    config.reset_settings_cache()
+    from openbourse.cli import _alembic_config
+
+    cfg = _alembic_config()
+    # script_location is rewritten to an absolute path so migrations resolve
+    # regardless of the working directory (e.g. inside the scheduler container).
+    script_location = cfg.get_main_option("script_location")
+    assert script_location is not None
+    assert Path(script_location).is_absolute()
+    assert Path(script_location).name == "alembic"
+    assert cfg.get_main_option("sqlalchemy.url") == "sqlite+aiosqlite:///:memory:"

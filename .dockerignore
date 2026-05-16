@@ -1,0 +1,26 @@
+# Keep the build context small and the image free of local/dev cruft.
+.git
+.github
+.venv
+venv
+__pycache__
+*.py[cod]
+*.egg-info
+build
+dist
+
+# Caches
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Not needed at runtime
+tests
+docs
+
+# Never bake secrets or local databases into the image — these come in at
+# runtime via docker-compose env_file / environment instead.
+.env
+*.db

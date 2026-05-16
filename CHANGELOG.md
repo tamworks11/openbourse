@@ -100,6 +100,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   use `bull` / `bear` / `risks` / `concerns` instead. CLI `--output json`
   output for `bourse lookup --brief` mirrors the new shape.
 
+### Fixed
+
+- **DB-sync marker no longer truncated.** The status bar packed identity,
+  screen path, and the DB-sync freshness marker into a single content
+  row; on normal-width terminals the marker (last in line) was clipped
+  off the right edge and appeared missing. The status bar is now a
+  genuine two-row header — identity + clock on top, DB-sync + provider
+  markers below — so each marker has room to render in full.
+
 ## [0.1.0] - 2026-05-08
 
 ### Added

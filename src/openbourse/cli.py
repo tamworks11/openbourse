@@ -31,6 +31,7 @@ from openbourse.screening import (
     lookup_candidate,
     lookup_with_history,
 )
+from openbourse.universe import DEFAULT_SYNC_SOURCES
 
 __all__ = ["app"]
 
@@ -49,6 +50,10 @@ app.add_typer(universe_app, name="universe")
 
 console = Console()
 
+_SYNC_SOURCES_HELP = (
+    f"Index source to sync; repeat for several. Default: {', '.join(DEFAULT_SYNC_SOURCES)}."
+)
+
 
 @app.command()
 def version() -> None:
@@ -61,26 +66,50 @@ def run(
     screen_name: str = typer.Option(
         "quality_compounders", "--screen", "-s", help="Screen to launch with."
     ),
+    sync: bool = typer.Option(
+        False,
+        "--sync",
+        help="Force-sync the database with fresh data from the provider "
+        f"({', '.join(DEFAULT_SYNC_SOURCES)}) before launching.",
+    ),
 ) -> None:
-    """Launch the Textual TUI."""
+    """Launch the Textual TUI.
+
+    Pass ``--sync`` to refresh the database from the data provider first, so
+    the screener's filters run against the latest fundamentals. Without it,
+    the TUI loads whatever was last ingested (see the status bar's "DB
+    synced" marker for how stale that is).
+    """
     if screen_name not in BUILTIN_SCREENS:
         raise typer.BadParameter(f"Unknown screen {screen_name!r}")
 
-    universe, history = asyncio.run(_load_universe_and_history())
+    if sync:
+        asyncio.run(
+            _run_universe_sync(
+                list(DEFAULT_SYNC_SOURCES),
+                with_history=False,
+                rate_limit_seconds=0.2,
+                dry_run=False,
+            )
+        )
+
+    universe, history, last_synced_at = asyncio.run(_load_universe_and_history())
     from openbourse.tui import BourseApp
 
-    BourseApp(providers=build_providers(), universe=universe, history=history).run()
+    BourseApp(
+        providers=build_providers(),
+        universe=universe,
+        history=history,
+        last_synced_at=last_synced_at,
+    ).run()
 
 
 @db_app.command("migrate")
 def db_migrate() -> None:
     """Apply Alembic migrations to the configured database."""
     from alembic import command
-    from alembic.config import Config
 
-    cfg = Config(str(_repo_root() / "alembic.ini"))
-    cfg.set_main_option("sqlalchemy.url", get_settings().database_url)
-    command.upgrade(cfg, "head")
+    command.upgrade(_alembic_config(), "head")
     console.print("[green]migrations applied[/green]")
 
 
@@ -193,6 +222,58 @@ def universe_ingest(
             rate_limit_seconds=rate,
             stale_after_days=stale_after,
             source_label=source_label,
+        )
+    )
+
+
+@universe_app.command("sync")
+def universe_sync(
+    sources: list[str] = typer.Option(  # noqa: B008 - Typer pattern
+        list(DEFAULT_SYNC_SOURCES),
+        "--source",
+        "-s",
+        help=_SYNC_SOURCES_HELP,
+    ),
+    with_history: bool = typer.Option(
+        False,
+        "--with-history",
+        help="Also fetch annual history for each ticker (more API calls).",
+    ),
+    rate: float = typer.Option(
+        0.2,
+        "--rate",
+        help="Seconds to sleep between API calls. Yahoo throttles aggressive clients.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print the resolved ticker union and exit without making API calls.",
+    ),
+) -> None:
+    """Force-sync index constituents so screening filters use the latest data.
+
+    Fetches the current constituents for each ``--source`` (S&P 500,
+    Nasdaq-100, Dow 30 by default), unions and de-duplicates them, then
+    re-ingests every ticker — ignoring snapshot freshness so the database is
+    fully up to date. Use this before running screens you want to trust.
+
+    Examples:
+        bourse universe sync
+        bourse universe sync -s sp500 -s nasdaq100 -s russell1000
+
+    """
+    from openbourse.universe import KNOWN_SOURCES
+
+    unknown = [s for s in sources if s not in KNOWN_SOURCES]
+    if unknown:
+        raise typer.BadParameter(f"unknown source(s) {unknown}; available: {sorted(KNOWN_SOURCES)}")
+
+    asyncio.run(
+        _run_universe_sync(
+            sources,
+            with_history=with_history,
+            rate_limit_seconds=rate,
+            dry_run=dry_run,
         )
     )
 
@@ -441,6 +522,28 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _alembic_config() -> Any:
+    """Build an Alembic ``Config`` with the right URL and migration scripts.
+
+    Locates ``alembic.ini`` in either the source-checkout layout (repo root)
+    or the current working directory — the latter covers an installed
+    package, e.g. inside the docker-compose ``scheduler`` container.
+    ``script_location`` is rewritten to an absolute path so migrations
+    resolve regardless of the process's working directory.
+    """
+    from alembic.config import Config
+
+    for ini in (_repo_root() / "alembic.ini", Path.cwd() / "alembic.ini"):
+        if ini.is_file():
+            cfg = Config(str(ini))
+            cfg.set_main_option("script_location", str(ini.parent / "alembic"))
+            cfg.set_main_option("sqlalchemy.url", get_settings().database_url)
+            return cfg
+    raise typer.BadParameter(
+        "alembic.ini not found — run `bourse db migrate` from the project root."
+    )
+
+
 def _json_default(value: Any) -> Any:
     if isinstance(value, datetime | date):
         return value.isoformat()
@@ -497,13 +600,18 @@ async def _load_universe_or_fixture() -> list[tuple[Instrument, FundamentalsSnap
 async def _load_universe_and_history() -> tuple[
     list[tuple[Instrument, FundamentalsSnapshot]],
     dict[str, list[FundamentalsSnapshot]],
+    datetime | None,
 ]:
-    """Return ``(universe, history)`` for the TUI bootstrap path.
+    """Return ``(universe, history, last_synced_at)`` for the TUI bootstrap path.
 
     Tries the database first; falls back to the bundled seed fixture so the
     TUI always has something to show. ``history`` keyed by ticker, ordered
-    ascending by ``as_of``.
+    ascending by ``as_of``. ``last_synced_at`` is the UTC time of the most
+    recent ``bourse universe sync`` (``None`` when never synced or on the
+    seed-fixture fallback).
     """
+    from openbourse.db.repositories import SyncRunRepository
+
     try:
         engine = create_engine_from_url(get_settings().database_url)
         factory = get_session_factory(engine)
@@ -511,15 +619,16 @@ async def _load_universe_and_history() -> tuple[
             fund_repo = FundamentalsRepository(session)
             pairs = await fund_repo.latest_for_all()
             history = await fund_repo.history_for_all()
+            latest_sync = await SyncRunRepository(session).latest()
         await engine.dispose()
         if pairs:
-            return pairs, history
+            return pairs, history, latest_sync.synced_at if latest_sync else None
     except (OSError, RuntimeError) as exc:  # pragma: no cover - DB unreachable
         console.print(f"[yellow]falling back to stub fixture: {exc}[/yellow]", style="dim")
     except Exception as exc:  # pragma: no cover - any DB driver error
         console.print(f"[yellow]falling back to stub fixture: {exc}[/yellow]", style="dim")
 
-    return _seed_universe(), _seed_history()
+    return _seed_universe(), _seed_history(), None
 
 
 def _seed_universe() -> list[tuple[Instrument, FundamentalsSnapshot]]:
@@ -687,6 +796,94 @@ async def _run_universe_ingest(
         await engine.dispose()
 
     _report_ingest_summary(summary)
+
+
+async def _run_universe_sync(
+    sources: list[str],
+    *,
+    with_history: bool,
+    rate_limit_seconds: float,
+    dry_run: bool,
+) -> None:
+    """Wire the providers + DB session to the force-sync engine."""
+    from rich.progress import (
+        BarColumn,
+        MofNCompleteColumn,
+        Progress,
+        SpinnerColumn,
+        TextColumn,
+        TimeElapsedColumn,
+    )
+
+    from openbourse.universe import fetch_source, force_sync_universe
+
+    if dry_run:
+        seen: set[str] = set()
+        union: list[str] = []
+        for name in sources:
+            console.print(f"[dim]Fetching {name} constituents…[/dim]")
+            for ticker in fetch_source(name):
+                if ticker.upper() not in seen:
+                    seen.add(ticker.upper())
+                    union.append(ticker.upper())
+        console.print(
+            f"[bold]Dry run[/bold] — would force-sync {len(union)} unique tickers "
+            f"from {', '.join(sources)}"
+        )
+        console.print(", ".join(union))
+        return
+
+    settings = get_settings()
+    providers = build_providers(settings)
+    engine = create_engine_from_url(settings.database_url)
+    factory = get_session_factory(engine)
+
+    console.print(
+        f"[bold]Force-syncing[/bold] {', '.join(sources)} "
+        f"via [cyan]{providers.fundamentals_mode}[/cyan]"
+        f"{' [dim](with history)[/dim]' if with_history else ''}"
+    )
+    console.print("[dim]Fetching index constituents…[/dim]")
+
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            console=console,
+        ) as progress_bar:
+            task = progress_bar.add_task("Syncing", total=None)
+
+            def _on_progress(ticker: str, index: int, total: int) -> None:
+                progress_bar.update(
+                    task, completed=index, total=total, description=f"Syncing {ticker}"
+                )
+
+            result = await force_sync_universe(
+                providers,
+                factory,
+                sources=sources,
+                with_history=with_history,
+                rate_limit_seconds=rate_limit_seconds,
+                progress=_on_progress,
+            )
+            progress_bar.update(task, completed=result.unique_tickers, description="Done")
+    finally:
+        await engine.dispose()
+
+    console.print()
+    for name, count in result.sources.items():
+        console.print(f"[cyan]{name}[/cyan] — {count} constituents")
+    for name, reason in result.source_errors:
+        console.print(f"[red]{name} failed[/red] — {reason}")
+    console.print(f"[dim]{result.unique_tickers} unique tickers after dedupe[/dim]")
+    _report_ingest_summary(result.ingest)
+    if result.synced_at is not None:
+        console.print(f"[green]database synced[/green] {result.synced_at:%Y-%m-%d %H:%M:%S} UTC")
+    else:
+        console.print("[yellow]nothing ingested — sync not recorded[/yellow]")
 
 
 def _report_ingest_summary(summary: Any) -> None:

@@ -3,14 +3,14 @@
 Layout:
 
     ┌─ status bar ──────────────────────────────────────────┐
-    │ BOURSE v…  screen://…           ●●● live  HH:MM UTC   │
+    │ OPENBOURSE v…  screen://…       ●●● live  HH:MM UTC   │
     ├─ screen meta ──────────┬─ detail pane ────────────────┤
     │ description / stats    │ focused candidate's metrics  │
     ├────────────────────────┴──────────────────────────────┤
     │ TOP CANDIDATES BY COMPOSITE SCORE                     │
     │ [DataTable — fills remaining space]                   │
     ├─ command bar ─────────────────────────────────────────┤
-    │ bourse> _                                             │
+    │ openbourse> _                                         │
     ├─ footer keybinds ─────────────────────────────────────┤
     └───────────────────────────────────────────────────────┘
 
@@ -22,6 +22,7 @@ The command bar accepts simple line-driven commands (``lookup INTC``,
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
+from datetime import datetime
 from typing import ClassVar
 
 from rich.text import Text
@@ -36,6 +37,7 @@ from openbourse.domain import (
     Candidate,
     FundamentalsSnapshot,
     Instrument,
+    Quote,
     ScreenDefinition,
     ScreenResult,
     Verdict,
@@ -61,6 +63,7 @@ COLUMNS = (
     "TICKER",
     "NAME",
     "PRICE",
+    "VOLUME",
     "MKT CAP",
     "REV GR",
     "GM",
@@ -121,6 +124,58 @@ def _format_price(price: float | None) -> str:
     if price is None:
         return "—"
     return f"${price:,.2f}"
+
+
+def _format_volume(volume: int | None) -> str:
+    """Compact share-volume formatter: 1.40B / 12.3M / 850K / 1,234.
+
+    ``None`` renders as an em-dash — Yahoo doesn't return a volume for
+    every ticker (thinly traded names, some ADRs), and the poll worker
+    only records it when present.
+    """
+    if volume is None:
+        return "—"
+    if volume >= 1_000_000_000:
+        return f"{volume / 1_000_000_000:.2f}B"
+    if volume >= 1_000_000:
+        return f"{volume / 1_000_000:.1f}M"
+    if volume >= 1_000:
+        return f"{volume / 1_000:.0f}K"
+    return f"{volume:,}"
+
+
+def _format_change(value: float | None) -> str:
+    """Signed absolute price change: +$2.34 / -$1.05 / em-dash when missing."""
+    if value is None:
+        return "—"
+    sign = "+" if value >= 0 else "-"
+    return f"{sign}${abs(value):,.2f}"
+
+
+def _format_signed_pct_opt(value: float | None) -> str:
+    """Signed percentage, em-dash when missing — None-aware ``_format_signed_pct``."""
+    return "—" if value is None else _format_signed_pct(value)
+
+
+def _format_pe(pe: float | None) -> str:
+    """Trailing P/E ratio to one decimal; em-dash when missing or non-positive."""
+    if pe is None or pe <= 0:
+        return "—"
+    return f"{pe:.1f}"
+
+
+def _detail_row(left: tuple[str, str], right: tuple[str, str] | None) -> str:
+    """Format one or two ``(label, value)`` pairs as a detail-pane line.
+
+    Two metrics per line keeps the detail pane compact enough to show the
+    full market + fundamentals set without overflowing its fixed height.
+    """
+    label_l, value_l = left
+    cell = f"{label_l:<15}{value_l:>11}"
+    if right is None:
+        return cell
+    label_r, value_r = right
+    return f"{cell}   {label_r:<15}{value_r:>11}"
 
 
 def _select_tickers_to_poll(
@@ -210,7 +265,13 @@ class ScreenerScreen(Screen[None]):
     # a single PgDn lands on already-fresh prices instead of waiting a
     # full poll cycle.
     QUOTE_POLL_VIEWPORT_PADDING: ClassVar[int] = 20
-    PRICE_COLUMN_INDEX: ClassVar[int] = 3  # tracks COLUMNS order: # | TICKER | NAME | PRICE | …
+    # Column indices into COLUMNS: # | TICKER | NAME | PRICE | VOLUME | …
+    PRICE_COLUMN_INDEX: ClassVar[int] = 3
+    VOLUME_COLUMN_INDEX: ClassVar[int] = 4
+    # How often the TUI re-reads the DB's last-sync timestamp, so a sync
+    # that completes while the app is open (e.g. the scheduled pre-market
+    # run) updates the status bar without a restart.
+    DB_SYNC_POLL_SECONDS: ClassVar[int] = 60
 
     def __init__(
         self,
@@ -219,22 +280,28 @@ class ScreenerScreen(Screen[None]):
         screen_name: str = "quality_compounders",
         universe: Iterable[tuple[Instrument, FundamentalsSnapshot]] | None = None,
         history: dict[str, list[FundamentalsSnapshot]] | None = None,
+        last_synced_at: datetime | None = None,
     ) -> None:
         super().__init__()
         self._providers = providers
         self._screen: ScreenDefinition = BUILTIN_SCREENS[screen_name]
         self._universe = list(universe) if universe is not None else []
         self._history = history or {}
+        self._last_synced_at = last_synced_at
         self._service = ScreeningService()
         self._result: ScreenResult | None = None
-        # Per-ticker price overrides applied on top of the snapshot's
-        # ``price_usd``. Updated by the polling worker. The detail pane
-        # and any cell-update logic should prefer this when present.
-        self._quote_overrides: dict[str, float] = {}
+        # Latest live quote per ticker from the poll worker. Sparse — only
+        # polled tickers appear. The table cells and detail pane prefer
+        # this over the snapshot's stale price when a quote is present.
+        self._latest_quotes: dict[str, Quote] = {}
 
     def compose(self) -> ComposeResult:
         """Build the full-bleed layout: status / split top / table / command / footer."""
-        yield StatusBar(self._providers, screen_path=self._screen.name)
+        yield StatusBar(
+            self._providers,
+            screen_path=self._screen.name,
+            last_synced_at=self._last_synced_at,
+        )
         yield Horizontal(
             Vertical(
                 Static(self._screen_description(), id="screen-meta-text"),
@@ -251,18 +318,21 @@ class ScreenerScreen(Screen[None]):
         yield Static("TOP CANDIDATES BY COMPOSITE SCORE", id="section-heading")
         yield DataTable(zebra_stripes=False, cursor_type="row", id="candidates")
         yield Horizontal(
-            Input(placeholder="bourse>  type a ticker (e.g. INTC) or 'help'", id="command-input"),
+            Input(
+                placeholder="openbourse>  type a ticker (e.g. INTC) or 'help'", id="command-input"
+            ),
             id="command-bar",
         )
         yield Footer()
 
     def on_mount(self) -> None:
-        """Wire columns onto the table, run the first screen, start the quote loop."""
+        """Wire columns onto the table, run the first screen, start the poll loops."""
         table = self.query_one("#candidates", DataTable)
         table.add_columns(*COLUMNS)
         self.refresh_results()
         table.focus()
         self._start_quote_polling()
+        self._start_db_sync_polling()
 
     def _start_quote_polling(self) -> None:
         """Schedule a periodic worker to refresh prices in place.
@@ -287,6 +357,43 @@ class ScreenerScreen(Screen[None]):
         """Fire-and-forget the polling worker on each tick of the timer."""
         self.run_worker(self._poll_quotes(), name="quote_poll", exclusive=False)
 
+    def _start_db_sync_polling(self) -> None:
+        """Schedule a periodic re-read of the DB's last-sync timestamp.
+
+        Keeps the status bar's "DB synced" marker current when a sync
+        finishes — e.g. the scheduled pre-market run — while the TUI is
+        already open. The first poll fires immediately so a sync that
+        completed between app launch and now is picked up at once.
+        """
+        self.run_worker(self._poll_db_sync(), name="db_sync_poll", exclusive=False)
+        self.set_interval(self.DB_SYNC_POLL_SECONDS, self._schedule_db_sync_poll)
+
+    def _schedule_db_sync_poll(self) -> None:
+        """Fire-and-forget the DB-sync poll worker on each tick of the timer."""
+        self.run_worker(self._poll_db_sync(), name="db_sync_poll", exclusive=False)
+
+    async def _poll_db_sync(self) -> None:
+        """Read the latest sync timestamp from the DB and update the status bar.
+
+        Failures are silent — if the database is briefly unreachable the
+        marker keeps its last known value and the next tick retries.
+        """
+        from openbourse.config import get_settings
+        from openbourse.db.engine import create_engine_from_url, get_session_factory
+        from openbourse.db.repositories import SyncRunRepository
+
+        try:
+            engine = create_engine_from_url(get_settings().database_url)
+            factory = get_session_factory(engine)
+            try:
+                async with factory() as session:
+                    latest = await SyncRunRepository(session).latest()
+            finally:
+                await engine.dispose()
+        except Exception:
+            return
+        self.query_one(StatusBar).update_db_synced(latest.synced_at if latest else None)
+
     async def _poll_quotes(self) -> None:
         """Fetch fresh prices for the visible rows and update the table.
 
@@ -310,7 +417,7 @@ class ScreenerScreen(Screen[None]):
         if not quotes:
             return
         for ticker, quote in quotes.items():
-            self._quote_overrides[ticker] = quote.price_usd
+            self._latest_quotes[ticker] = quote
         self._apply_quote_overrides_to_table(quotes)
         # Refresh the detail pane if the focused row's price moved — the
         # detail pane reads from the candidate snapshot otherwise, missing
@@ -362,11 +469,10 @@ class ScreenerScreen(Screen[None]):
         return (scroll_y, scroll_y + visible_height)
 
     def _apply_quote_overrides_to_table(self, quotes: Mapping[str, object]) -> None:
-        """Update the price cell of every row whose ticker has a fresh quote.
+        """Update the price and volume cells of every freshly-quoted row.
 
-        Uses ``update_cell_at`` with row keys equal to the ticker (set in
-        :meth:`_render_table`) so reordering/filtering doesn't desync the
-        cell coordinates.
+        Indexes cells positionally against ``self._result.candidates``,
+        which is the same order ``_render_table`` painted them in.
         """
         if self._result is None:
             return
@@ -375,13 +481,17 @@ class ScreenerScreen(Screen[None]):
             ticker = candidate.instrument.ticker
             if ticker not in quotes:
                 continue
-            price = self._quote_overrides.get(ticker)
-            if price is None:
+            quote = self._latest_quotes.get(ticker)
+            if quote is None:
                 continue
             try:
                 table.update_cell_at(
                     Coordinate(row_index, self.PRICE_COLUMN_INDEX),
-                    _format_price(price),
+                    _format_price(quote.price_usd),
+                )
+                table.update_cell_at(
+                    Coordinate(row_index, self.VOLUME_COLUMN_INDEX),
+                    _format_volume(quote.volume),
                 )
             except Exception:
                 continue
@@ -442,15 +552,18 @@ class ScreenerScreen(Screen[None]):
     def _row_for(self, index: int, candidate: Candidate) -> tuple[str | Text, ...]:
         snap = candidate.snapshot
         verdict_text = Text(candidate.verdict.value, style=VERDICT_STYLES[candidate.verdict])
-        # Prefer the polled-quote override if we have one — keeps the
-        # initial paint consistent with whatever the polling loop has
-        # already fetched, instead of flashing the snapshot price first.
-        price = self._quote_overrides.get(candidate.instrument.ticker, snap.price_usd)
+        # Prefer the latest live quote if we have one — keeps the initial
+        # paint consistent with whatever the polling loop has already
+        # fetched, instead of flashing the snapshot price first.
+        quote = self._latest_quotes.get(candidate.instrument.ticker)
+        price = quote.price_usd if quote is not None else snap.price_usd
+        volume = quote.volume if quote is not None else None
         return (
             f"{index:02d}",
             candidate.instrument.ticker,
             candidate.instrument.name,
             _format_price(price),
+            _format_volume(volume),
             _format_market_cap(snap.market_cap_usd),
             _format_signed_pct(snap.revenue_growth_pct),
             _format_pct(snap.gross_margin_pct),
@@ -476,20 +589,42 @@ class ScreenerScreen(Screen[None]):
         # Position indicator — useful when the candidate list is thousands long.
         position = f"[dim]{row_index + 1:,}/{len(self._result.candidates):,}[/dim]  "
         fit_pct = compute_style_fit(snap, self._screen)
-        # Prefer the latest polled price if we have one; this is what's
+        # Prefer the latest live quote if we have one; this is what's
         # already showing in the table column, so keeping the detail pane
         # consistent prevents "$35.37 in the table, $34.91 in the pane".
-        price = self._quote_overrides.get(c.instrument.ticker, snap.price_usd)
+        # Change / Change % / Avg Vol (3M) / 52 Wk Change are quote-only —
+        # an em-dash until the row has been polled.
+        quote = self._latest_quotes.get(c.instrument.ticker)
+        price = quote.price_usd if quote is not None else snap.price_usd
+        # Quote-only fields — None until the row has been polled.
+        q_change = quote.change if quote is not None else None
+        q_change_pct = quote.change_pct if quote is not None else None
+        q_volume = quote.volume if quote is not None else None
+        q_avg_vol = quote.avg_volume_3m if quote is not None else None
+        q_52wk = quote.year_change_pct if quote is not None else None
+        metrics: list[tuple[str, str]] = [
+            ("Price", _format_price(price)),
+            ("Change", _format_change(q_change)),
+            ("Change %", _format_signed_pct_opt(q_change_pct)),
+            ("Volume", _format_volume(q_volume)),
+            ("Avg Volume (3M)", _format_volume(q_avg_vol)),
+            ("Market Cap", _format_market_cap(snap.market_cap_usd)),
+            ("PE Ratio (TTM)", _format_pe(snap.pe_ratio_ttm)),
+            ("52 Wk Change %", _format_signed_pct_opt(q_52wk)),
+            ("Rev growth", _format_signed_pct(snap.revenue_growth_pct)),
+            ("Gross margin", _format_pct(snap.gross_margin_pct)),
+            ("Net debt/EBITDA", f"{snap.net_debt_to_ebitda:.2f}x"),
+            ("FCF yield", _format_pct(snap.fcf_yield_pct)),
+        ]
+        metric_lines = "\n".join(
+            _detail_row(metrics[i], metrics[i + 1] if i + 1 < len(metrics) else None)
+            for i in range(0, len(metrics), 2)
+        )
         body.update(
             f"{position}[b cyan]{c.instrument.ticker}[/b cyan]  {c.instrument.name}\n"
             f"[dim]{c.instrument.sector or '—'}  ·  {c.instrument.exchange or '—'}[/dim]\n"
             f"\n"
-            f"Price           {_format_price(price):>12}\n"
-            f"Mkt cap         {_format_market_cap(snap.market_cap_usd):>12}\n"
-            f"Rev growth      {_format_signed_pct(snap.revenue_growth_pct):>12}\n"
-            f"Gross margin    {_format_pct(snap.gross_margin_pct):>12}\n"
-            f"Net debt/EBITDA {snap.net_debt_to_ebitda:>11.2f}x\n"
-            f"FCF yield       {_format_pct(snap.fcf_yield_pct):>12}\n"
+            f"{metric_lines}\n"
             f"\n"
             f"Score [b]{c.score:>3}[/b]   "
             f"Risk [b {_risk_glyph_color(c.risk_score)}]"

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import math
 from datetime import UTC, datetime
 from typing import Any
 
@@ -28,19 +29,74 @@ import httpx
 from openbourse.domain import Quote
 
 
+def _opt_float(value: Any) -> float | None:
+    """Coerce ``value`` to a finite float, or ``None`` for missing/NaN/garbage."""
+    if value is None:
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _opt_int(value: Any) -> int | None:
+    """Coerce ``value`` to an int, or ``None`` for missing/garbage values."""
+    result = _opt_float(value)
+    return int(result) if result is not None else None
+
+
 class StubQuoteProvider:
-    """Deterministic synthetic prices for offline development."""
+    """Deterministic synthetic prices and volumes for offline development."""
 
     async def fetch_quotes(self, tickers: list[str]) -> dict[str, Quote]:
-        """Return one :class:`Quote` per ticker. Price is deterministic per ticker."""
+        """Return one :class:`Quote` per ticker, deterministic per ticker."""
         now = datetime.now(UTC)
-        return {t: Quote(ticker=t, price_usd=_synthetic_price(t), fetched_at=now) for t in tickers}
+        return {
+            t: Quote(
+                ticker=t,
+                price_usd=_synthetic_price(t),
+                fetched_at=now,
+                volume=_synthetic_volume(t),
+                previous_close=_synthetic_previous_close(t),
+                avg_volume_3m=_synthetic_avg_volume_3m(t),
+                year_change_pct=_synthetic_year_change_pct(t),
+            )
+            for t in tickers
+        }
+
+
+def _hash_int(ticker: str, salt: str) -> int:
+    """Derive a stable 32-bit-ish int from ``ticker`` and a ``salt`` label."""
+    digest = hashlib.sha256(f"{ticker}-{salt}".encode()).hexdigest()
+    return int(digest[:8], 16)
 
 
 def _synthetic_price(ticker: str) -> float:
     """Hash the ticker to a stable, plausible-looking price in [10, 510]."""
     digest = hashlib.sha256(ticker.encode("utf-8")).hexdigest()
     return 10.0 + (int(digest[:8], 16) % 50_000) / 100.0
+
+
+def _synthetic_volume(ticker: str) -> int:
+    """Hash the ticker to a stable, plausible daily share volume [100K, ~50M]."""
+    return 100_000 + _hash_int(ticker, "volume") % 50_000_000
+
+
+def _synthetic_avg_volume_3m(ticker: str) -> int:
+    """Hash the ticker to a stable trailing-3-month average volume [100K, ~60M]."""
+    return 100_000 + _hash_int(ticker, "avgvol3m") % 60_000_000
+
+
+def _synthetic_previous_close(ticker: str) -> float:
+    """Derive a prior close near the synthetic price — a stable ±3% daily move."""
+    move = (_hash_int(ticker, "prevclose") % 600 - 300) / 10_000.0
+    return round(_synthetic_price(ticker) / (1 + move), 2)
+
+
+def _synthetic_year_change_pct(ticker: str) -> float:
+    """Hash the ticker to a stable 52-week change percent in [-50.0, +89.9]."""
+    return round((_hash_int(ticker, "yearchg") % 1400 - 500) / 10.0, 1)
 
 
 class YfinanceQuoteProvider:
@@ -92,9 +148,17 @@ def _yfinance_quote(ticker: str) -> Quote | None:
     price = float(getattr(info, "last_price", 0.0) or 0.0)
     if price <= 0:
         return None
-    volume_raw = getattr(info, "last_volume", None)
-    volume = int(volume_raw) if volume_raw is not None else None
-    return Quote(ticker=ticker, price_usd=price, fetched_at=datetime.now(UTC), volume=volume)
+    # Yahoo's year_change is a fraction (0.184 → +18.4%); express as a percent.
+    year_change = _opt_float(getattr(info, "year_change", None))
+    return Quote(
+        ticker=ticker,
+        price_usd=price,
+        fetched_at=datetime.now(UTC),
+        volume=_opt_int(getattr(info, "last_volume", None)),
+        previous_close=_opt_float(getattr(info, "previous_close", None)),
+        avg_volume_3m=_opt_int(getattr(info, "three_month_average_volume", None)),
+        year_change_pct=year_change * 100 if year_change is not None else None,
+    )
 
 
 class FmpQuoteProvider:
@@ -140,10 +204,11 @@ class FmpQuoteProvider:
 def _parse_fmp_quotes(payload: Any) -> dict[str, Quote]:
     """Project FMP's ``/quote`` array into a ticker→Quote dict.
 
-    FMP returns a list of ``{"symbol": ..., "price": ..., "volume": ...}``
-    rows. Rows missing a positive price are dropped — caller treats as
-    "no fresh data" rather than persisting a zero. Bad timestamps fall
-    back to "now" so the UI's stale-indicator stays meaningful.
+    FMP returns a list of ``{"symbol", "price", "volume", "previousClose",
+    "avgVolume", ...}`` rows. Rows missing a positive price are dropped —
+    caller treats as "no fresh data" rather than persisting a zero. The
+    ``/quote`` endpoint exposes no 52-week change, so ``year_change_pct``
+    is left ``None`` for FMP.
     """
     if not isinstance(payload, list):
         return {}
@@ -155,16 +220,16 @@ def _parse_fmp_quotes(payload: Any) -> dict[str, Quote]:
         symbol = row.get("symbol")
         if not isinstance(symbol, str):
             continue
-        try:
-            price = float(row.get("price") or 0.0)
-        except (TypeError, ValueError):
+        price = _opt_float(row.get("price"))
+        if price is None or price <= 0:
             continue
-        if price <= 0:
-            continue
-        volume_raw = row.get("volume")
-        try:
-            volume = int(volume_raw) if volume_raw is not None else None
-        except (TypeError, ValueError):
-            volume = None
-        out[symbol] = Quote(ticker=symbol, price_usd=price, fetched_at=now, volume=volume)
+        out[symbol] = Quote(
+            ticker=symbol,
+            price_usd=price,
+            fetched_at=now,
+            volume=_opt_int(row.get("volume")),
+            previous_close=_opt_float(row.get("previousClose")),
+            avg_volume_3m=_opt_int(row.get("avgVolume")),
+            year_change_pct=None,
+        )
     return out

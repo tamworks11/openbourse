@@ -270,6 +270,9 @@ def _parse_current_fundamentals(
     market_cap = float(profile_row.get("marketCap") or km_row.get("marketCap") or 0.0)
     price = float(profile_row.get("price") or 0.0) or None
 
+    # Trailing P/E straight from key-metrics-ttm; drop non-positive values.
+    pe_ttm = float(km_row.get("peRatioTTM") or 0.0)
+
     # fetch() asks for annual income data, so consecutive rows are years apart;
     # lookback=1 yields a true YoY growth figure.
     return FundamentalsSnapshot(
@@ -283,6 +286,7 @@ def _parse_current_fundamentals(
         price_usd=price,
         revenue_ttm_usd=None,
         ebitda_ttm_usd=None,
+        pe_ratio_ttm=pe_ttm if pe_ttm > 0 else None,
         # FMP's key-metrics-ttm exposes ROIC as a decimal (e.g. 0.18 for 18%).
         roic_pct=float(km_row.get("roicTTM") or 0.0) * 100,
     )
@@ -726,10 +730,22 @@ def _populate_synthetic_roic(
             replace(
                 s,
                 roic_pct=_synthetic_roic(s.gross_margin_pct, s.fcf_yield_pct, year_offset=i),
+                # Keep a real P/E if one is present; otherwise synthesize.
+                pe_ratio_ttm=s.pe_ratio_ttm or _synthetic_pe(s.gross_margin_pct),
             )
             for i, s in enumerate(sorted_snaps)
         ]
     return out
+
+
+def _synthetic_pe(gross_margin_pct: float) -> float:
+    """Derive a plausible trailing P/E for offline fixtures.
+
+    Scales with gross margin so high-margin compounders carry richer
+    multiples than low-margin names. Purely cosmetic — keeps the offline
+    detail pane and screenshots from showing an em-dash for P/E.
+    """
+    return round(12.0 + gross_margin_pct * 0.45, 1)
 
 
 def _synthetic_roic(

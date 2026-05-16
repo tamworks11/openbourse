@@ -56,6 +56,9 @@ class FundamentalsSnapshot:
     price_usd: float | None = None
     revenue_ttm_usd: float | None = None
     ebitda_ttm_usd: float | None = None
+    # Trailing-twelve-month price/earnings ratio. None when the provider
+    # supplies none or earnings are non-positive (a P/E would be meaningless).
+    pe_ratio_ttm: float | None = None
     # Return on invested capital, in percent. 0.0 when the underlying
     # provider can't produce one (statements missing tax info, balance-
     # sheet items, etc.) — the chart treats 0 as "no data" by skipping
@@ -228,6 +231,26 @@ class Quote:
     price_usd: float
     fetched_at: datetime
     volume: int | None = None
+    # Prior session's close — the baseline for the daily change figures.
+    previous_close: float | None = None
+    # Trailing three-month average daily share volume.
+    avg_volume_3m: int | None = None
+    # 52-week price change, in percent (18.4 means +18.4%).
+    year_change_pct: float | None = None
+
+    @property
+    def change(self) -> float | None:
+        """Absolute price change since the previous close; None when unknown."""
+        if self.previous_close is None:
+            return None
+        return self.price_usd - self.previous_close
+
+    @property
+    def change_pct(self) -> float | None:
+        """Percent price change since the previous close; None when unknown."""
+        if not self.previous_close:  # None or 0.0 — no usable baseline
+            return None
+        return (self.price_usd - self.previous_close) / self.previous_close * 100
 
 
 @dataclass(frozen=True, slots=True)

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -13,6 +15,7 @@ from openbourse.db.models import (
     ConcernScanRow,
     FundamentalsRow,
     InstrumentRow,
+    SyncRunRow,
     WatchlistRow,
 )
 from openbourse.domain import ConcernFinding, FundamentalsSnapshot, Instrument
@@ -53,6 +56,7 @@ def _to_snapshot(row: FundamentalsRow, ticker: str) -> FundamentalsSnapshot:
         price_usd=row.price_usd,
         revenue_ttm_usd=row.revenue_ttm_usd,
         ebitda_ttm_usd=row.ebitda_ttm_usd,
+        pe_ratio_ttm=row.pe_ratio_ttm,
         roic_pct=row.roic_pct,
     )
 
@@ -136,6 +140,7 @@ class FundamentalsRepository:
             "price_usd": snapshot.price_usd,
             "revenue_ttm_usd": snapshot.revenue_ttm_usd,
             "ebitda_ttm_usd": snapshot.ebitda_ttm_usd,
+            "pe_ratio_ttm": snapshot.pe_ratio_ttm,
             "roic_pct": snapshot.roic_pct,
         }
         update_cols = {k: v for k, v in values.items() if k not in {"instrument_id", "as_of"}}
@@ -296,6 +301,71 @@ class ConcernScanRepository:
         else:
             existing.findings = payload
             existing.model = model
+
+
+@dataclass(frozen=True)
+class SyncRun:
+    """A recorded universe force-sync. ``synced_at`` is UTC-aware."""
+
+    synced_at: datetime
+    sources: list[str]
+    ticker_count: int
+    ingested: int
+    failed: int
+
+
+class SyncRunRepository:
+    """Append-only audit log of universe force-syncs (``bourse universe sync``)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def record(
+        self,
+        *,
+        sources: list[str],
+        ticker_count: int,
+        ingested: int,
+        failed: int,
+    ) -> SyncRun:
+        """Append a sync-run row stamped with the current UTC time."""
+        synced_at = datetime.now(UTC)
+        self.session.add(
+            SyncRunRow(
+                synced_at=synced_at,
+                sources=sources,
+                ticker_count=ticker_count,
+                ingested=ingested,
+                failed=failed,
+            )
+        )
+        return SyncRun(
+            synced_at=synced_at,
+            sources=sources,
+            ticker_count=ticker_count,
+            ingested=ingested,
+            failed=failed,
+        )
+
+    async def latest(self) -> SyncRun | None:
+        """Return the most recent sync run, or None if the DB was never synced."""
+        row = await self.session.scalar(
+            select(SyncRunRow).order_by(SyncRunRow.synced_at.desc()).limit(1)
+        )
+        if row is None:
+            return None
+        # SQLite hands back a naive datetime even for timezone=True columns;
+        # the writer always stores UTC, so re-attach the tzinfo on read.
+        synced_at = row.synced_at
+        if synced_at.tzinfo is None:
+            synced_at = synced_at.replace(tzinfo=UTC)
+        return SyncRun(
+            synced_at=synced_at,
+            sources=list(row.sources),
+            ticker_count=row.ticker_count,
+            ingested=row.ingested,
+            failed=row.failed,
+        )
 
 
 def _finding_to_dict(f: ConcernFinding) -> dict[str, object]:

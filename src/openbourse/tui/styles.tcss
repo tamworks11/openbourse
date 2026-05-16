@@ -9,11 +9,16 @@ Screen {
 
 #status-bar {
     dock: top;
-    height: 2;
+    /* 2 content rows + 1 accent border row. */
+    height: 3;
     background: $boost;
     color: $text;
     padding: 0 1;
     border-bottom: solid $accent;
+}
+
+#status-bar .status-row {
+    height: 1;
 }
 
 #status-bar .left {
@@ -26,7 +31,7 @@ Screen {
 }
 
 #top-row {
-    height: 9;
+    height: 14;
     border-bottom: solid $accent;
 }
 

@@ -213,6 +213,13 @@ def _parse_info(ticker: str, info: dict[str, Any]) -> FundamentalsSnapshot:
     roa = float(info.get("returnOnAssets") or 0.0)
     roic_pct = roa * 100 if roa > 0 else 0.0
 
+    # Trailing P/E — Yahoo gives it directly. Drop non-positive values:
+    # a negative trailingPE (loss-making TTM) isn't a meaningful ratio.
+    pe_raw = info.get("trailingPE")
+    pe_ratio_ttm = float(pe_raw) if pe_raw else None
+    if pe_ratio_ttm is not None and pe_ratio_ttm <= 0:
+        pe_ratio_ttm = None
+
     return FundamentalsSnapshot(
         ticker=ticker,
         as_of=date.today(),
@@ -224,6 +231,7 @@ def _parse_info(ticker: str, info: dict[str, Any]) -> FundamentalsSnapshot:
         price_usd=price,
         revenue_ttm_usd=float(info.get("totalRevenue") or 0.0) or None,
         ebitda_ttm_usd=ebitda or None,
+        pe_ratio_ttm=pe_ratio_ttm,
         roic_pct=roic_pct,
     )
 

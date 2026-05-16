@@ -27,6 +27,26 @@ class TestStubQuoteProvider:
         provider = StubQuoteProvider()
         assert await provider.fetch_quotes([]) == {}
 
+    async def test_includes_a_deterministic_volume(self) -> None:
+        provider = StubQuoteProvider()
+        first = (await provider.fetch_quotes(["CDNS"]))["CDNS"].volume
+        second = (await provider.fetch_quotes(["CDNS"]))["CDNS"].volume
+        assert first is not None
+        assert first == second
+        assert 100_000 <= first <= 100_000 + 50_000_000
+
+    async def test_populates_change_avg_volume_and_year_change(self) -> None:
+        quote = (await StubQuoteProvider().fetch_quotes(["CDNS"]))["CDNS"]
+        # Every quote-only field is present so the offline detail pane
+        # renders real numbers instead of em-dashes.
+        assert quote.previous_close is not None
+        assert quote.avg_volume_3m is not None
+        assert quote.year_change_pct is not None
+        # change / change_pct are derived from price + previous_close.
+        assert quote.change is not None
+        assert quote.change_pct is not None
+        assert -50.0 <= quote.year_change_pct <= 90.0
+
     async def test_price_is_deterministic_per_ticker(self) -> None:
         """Same ticker hits the same hash bucket → same price across calls."""
         provider = StubQuoteProvider()
@@ -96,3 +116,44 @@ class TestParseFmpQuotes:
     def test_garbage_volume_does_not_crash(self) -> None:
         payload = [{"symbol": "AAA", "price": 100.0, "volume": "not-a-number"}]
         assert _parse_fmp_quotes(payload)["AAA"].volume is None
+
+    def test_extracts_previous_close_and_avg_volume(self) -> None:
+        payload = [
+            {
+                "symbol": "AAPL",
+                "price": 175.0,
+                "previousClose": 170.0,
+                "avgVolume": 55_000_000,
+            }
+        ]
+        quote = _parse_fmp_quotes(payload)["AAPL"]
+        assert quote.previous_close == 170.0
+        assert quote.avg_volume_3m == 55_000_000
+        # FMP's /quote endpoint carries no 52-week change.
+        assert quote.year_change_pct is None
+
+    def test_change_fields_default_to_none_when_absent(self) -> None:
+        quote = _parse_fmp_quotes([{"symbol": "AAA", "price": 100.0}])["AAA"]
+        assert quote.previous_close is None
+        assert quote.avg_volume_3m is None
+        assert quote.change is None
+        assert quote.change_pct is None
+
+
+class TestQuoteChangeProperties:
+    def test_change_and_change_pct_computed_from_previous_close(self) -> None:
+        quote = _parse_fmp_quotes([{"symbol": "AAA", "price": 102.0, "previousClose": 100.0}])[
+            "AAA"
+        ]
+        assert quote.change == pytest.approx(2.0)
+        assert quote.change_pct == pytest.approx(2.0)
+
+    def test_negative_change(self) -> None:
+        quote = _parse_fmp_quotes([{"symbol": "AAA", "price": 95.0, "previousClose": 100.0}])["AAA"]
+        assert quote.change == pytest.approx(-5.0)
+        assert quote.change_pct == pytest.approx(-5.0)
+
+    def test_change_pct_is_none_when_previous_close_is_zero(self) -> None:
+        # A zero baseline can't yield a percentage — guard against /0.
+        quote = _parse_fmp_quotes([{"symbol": "AAA", "price": 95.0, "previousClose": 0.0}])["AAA"]
+        assert quote.change_pct is None

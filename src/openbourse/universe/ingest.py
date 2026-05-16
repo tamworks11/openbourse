@@ -25,9 +25,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from openbourse.db.models import FundamentalsRow, InstrumentRow
-from openbourse.db.repositories import FundamentalsRepository, InstrumentRepository
+from openbourse.db.repositories import (
+    FundamentalsRepository,
+    InstrumentRepository,
+    SyncRunRepository,
+)
 from openbourse.domain import FundamentalsSnapshot, Instrument
 from openbourse.providers.base import Providers
+from openbourse.universe.sources import fetch_source
+
+# Index sources synced by default — the major US benchmarks most screens
+# filter against. Override via the ``sources`` argument to add Russell, etc.
+DEFAULT_SYNC_SOURCES: tuple[str, ...] = ("sp500", "nasdaq100", "dow30")
 
 
 @dataclass
@@ -90,6 +99,95 @@ async def ingest_tickers(
     return summary
 
 
+@dataclass
+class SyncResult:
+    """Aggregate result of a :func:`force_sync_universe` run.
+
+    ``sources`` maps each successfully-fetched source name to its constituent
+    count. ``source_errors`` collects sources that failed to fetch (Wikipedia
+    layout change, network blip) — those are skipped so the rest still sync.
+    ``ingest`` is the underlying bulk-ingest summary for the deduped union.
+    ``synced_at`` is the UTC time the run was recorded to the ``sync_runs``
+    audit table — ``None`` when nothing ingested, so no sync was recorded.
+    """
+
+    sources: dict[str, int] = field(default_factory=dict)
+    source_errors: list[tuple[str, str]] = field(default_factory=list)
+    ingest: IngestSummary = field(default_factory=IngestSummary)
+    synced_at: datetime | None = None
+
+    @property
+    def unique_tickers(self) -> int:
+        """Number of distinct tickers across all fetched sources."""
+        return self.ingest.total
+
+
+async def force_sync_universe(
+    providers: Providers,
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    sources: Sequence[str] = DEFAULT_SYNC_SOURCES,
+    with_history: bool = False,
+    rate_limit_seconds: float = 0.2,
+    progress: ProgressFn | None = None,
+    source_fetcher: Callable[[str], list[str]] = fetch_source,
+) -> SyncResult:
+    """Fetch the latest constituents for ``sources`` and force-ingest them all.
+
+    "Force" means ``stale_after_days=0`` — every ticker is re-fetched from the
+    provider regardless of how recently it was last ingested, so screening
+    filters always run against fully up-to-date fundamentals.
+
+    Constituents from all sources are unioned and de-duplicated (a ticker in
+    both the S&P 500 and Nasdaq-100 is fetched once). A source that fails to
+    fetch is recorded in :attr:`SyncResult.source_errors` and skipped; the
+    remaining sources still sync.
+
+    ``source_fetcher`` is injectable purely for testing — production callers
+    use the default :func:`openbourse.universe.sources.fetch_source`.
+    """
+    result = SyncResult()
+    seen: set[str] = set()
+    combined: list[str] = []
+    for name in sources:
+        try:
+            tickers = source_fetcher(name)
+        except Exception as exc:  # network / layout-change / unknown source
+            result.source_errors.append((name, f"{type(exc).__name__}: {exc}"))
+            continue
+        result.sources[name] = len(tickers)
+        for ticker in tickers:
+            upper = ticker.upper()
+            if upper not in seen:
+                seen.add(upper)
+                combined.append(upper)
+
+    result.ingest = await ingest_tickers(
+        combined,
+        providers,
+        session_factory,
+        with_history=with_history,
+        rate_limit_seconds=rate_limit_seconds,
+        stale_after_days=0,  # force — never skip on freshness
+        progress=progress,
+    )
+
+    # Record the sync only when data actually landed — a run that ingested
+    # nothing (every source down) shouldn't reset "DB last synced".
+    if result.ingest.ingested > 0:
+        async with session_factory() as session:
+            run = await SyncRunRepository(session).record(
+                sources=list(result.sources),
+                ticker_count=result.ingest.total,
+                ingested=result.ingest.ingested,
+                failed=len(result.ingest.failed),
+            )
+            await session.commit()
+        result.synced_at = run.synced_at
+
+    return result
+
+
 async def _ingest_one(
     session: AsyncSession,
     providers: Providers,
@@ -143,7 +241,14 @@ async def _is_fresh(session: AsyncSession, ticker: str, stale_after_days: int) -
 
 
 # Re-export for convenience.
-__all__ = ["IngestSummary", "ProgressFn", "ingest_tickers"]
+__all__ = [
+    "DEFAULT_SYNC_SOURCES",
+    "IngestSummary",
+    "ProgressFn",
+    "SyncResult",
+    "force_sync_universe",
+    "ingest_tickers",
+]
 
 
 # Help mypy realise FundamentalsSnapshot is in scope; kept for documentation.

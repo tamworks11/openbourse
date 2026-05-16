@@ -3,38 +3,88 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import Static
 
 from openbourse import __version__
 from openbourse.providers import Providers
 
+# A DB sync older than this many *weekday* seconds turns the status-bar
+# marker yellow. Weekend time is excluded (see ``_weekday_seconds``) so a
+# Friday-evening sync isn't flagged stale on a Saturday.
+DB_STALE_AFTER_SECONDS = 2 * 60 * 60  # 2 hours
 
-class StatusBar(Horizontal):
-    """Two-row header: title/providers/time on top, screen path on bottom."""
+
+def _weekday_seconds(start: datetime, end: datetime) -> float:
+    """Seconds elapsed between ``start`` and ``end``, counting Mon-Fri only.
+
+    Saturday and Sunday (UTC) are excluded, so the staleness check doesn't
+    fire purely because the market — and the scheduled sync — paused over
+    the weekend. Returns ``0.0`` when ``end`` is at or before ``start``.
+    """
+    if end <= start:
+        return 0.0
+    total = 0.0
+    cursor = start
+    while cursor < end:
+        # Walk one calendar day at a time so each segment has a single,
+        # well-defined weekday.
+        next_midnight = (cursor + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        segment_end = min(next_midnight, end)
+        if cursor.weekday() < 5:  # Mon=0 … Fri=4; Sat/Sun excluded
+            total += (segment_end - cursor).total_seconds()
+        cursor = segment_end
+    return total
+
+
+class StatusBar(Vertical):
+    """Two-row header.
+
+    Row 1 — identity: ``OPENBOURSE v… screen://…`` on the left, the live
+    UTC clock on the right.
+
+    Row 2 — data freshness: the DB-sync marker on the left, provider-mode
+    markers + quote-poll freshness on the right.
+
+    Splitting across two rows is deliberate: a single row couldn't fit
+    the DB-sync marker without truncating it on normal-width terminals.
+    """
 
     DEFAULT_CSS = ""
     now: reactive[datetime] = reactive(lambda: datetime.now(UTC))
 
-    def __init__(self, providers: Providers, screen_path: str = "") -> None:
+    def __init__(
+        self,
+        providers: Providers,
+        screen_path: str = "",
+        last_synced_at: datetime | None = None,
+    ) -> None:
         super().__init__(id="status-bar")
         self._providers = providers
         self._screen_path = screen_path
-        self._left = Static("", classes="left", id="status-left")
-        self._right = Static("", classes="right", id="status-right")
+        # UTC time of the last `bourse universe sync`; None = never synced.
+        self._last_synced_at = last_synced_at
+        # Row 1 — identity + clock.
+        self._row1_left = Static("", classes="left", id="status-identity")
+        self._row1_right = Static("", classes="right", id="status-clock")
+        # Row 2 — DB-sync marker + provider/quote markers.
+        self._row2_left = Static("", classes="left", id="status-db-sync")
+        self._row2_right = Static("", classes="right", id="status-providers")
         # Last successful quote-poll timestamp, surfaced as "Quotes · 12s ago".
         # ``None`` means no successful poll yet (or polling disabled); the
         # marker shows "off" in that case.
         self._last_quote_at: datetime | None = None
         self._quotes_disabled: bool = False
 
-    def compose(self) -> Iterable[Static]:
-        """Yield the left (title/path) and right (providers/clock) halves."""
-        yield self._left
-        yield self._right
+    def compose(self) -> Iterable[Horizontal]:
+        """Yield the two header rows, each a left/right Horizontal."""
+        yield Horizontal(self._row1_left, self._row1_right, classes="status-row")
+        yield Horizontal(self._row2_left, self._row2_right, classes="status-row")
 
     def on_mount(self) -> None:
         """Schedule the once-per-second clock tick and paint the initial text."""
@@ -72,6 +122,30 @@ class StatusBar(Horizontal):
         self._last_quote_at = None
         self._refresh_text()
 
+    def update_db_synced(self, when: datetime | None) -> None:
+        """Update the recorded DB-sync time and repaint the marker.
+
+        Called by the screener's poll worker so a sync that completes
+        (e.g. the scheduled pre-market run) while the TUI is open is
+        reflected without a restart. ``None`` leaves it "never synced".
+        """
+        self._last_synced_at = when
+        self._refresh_text()
+
+    def _db_sync_marker(self, now: datetime) -> str:
+        """Render the "DB synced …" indicator shown on the left half.
+
+        The leading ``●`` is red when the database was never synced,
+        yellow once the last sync is more than :data:`DB_STALE_AFTER_SECONDS`
+        of weekday time old, and green while the data is fresh.
+        """
+        if self._last_synced_at is None:
+            return "[red]●[/red] [red]DB never synced[/red]"
+        stamp = self._last_synced_at.strftime("%Y-%m-%d %H:%M")
+        if _weekday_seconds(self._last_synced_at, now) > DB_STALE_AFTER_SECONDS:
+            return f"[yellow]●[/yellow] [yellow]DB synced[/yellow] {stamp} UTC"
+        return f"[green]●[/green] [dim]DB synced[/dim] {stamp} UTC"
+
     def _provider_marker(self) -> str:
         return (
             f"● FMP {self._providers.fundamentals_mode}  "
@@ -99,7 +173,12 @@ class StatusBar(Horizontal):
 
     def _refresh_text(self) -> None:
         timestamp = self.now.strftime("%Y-%m-%d %H:%M:%S")
-        self._left.update(
-            f"[b]BOURSE[/b] v{__version__}    [dim]screen://[/dim][b]{self._screen_path or '-'}[/b]"
+        # Row 1 — identity (left) + clock (right).
+        self._row1_left.update(
+            f"[b]OPENBOURSE[/b] v{__version__}    "
+            f"[dim]screen://[/dim][b]{self._screen_path or '-'}[/b]"
         )
-        self._right.update(f"{self._provider_marker()}    {timestamp} UTC")
+        self._row1_right.update(f"{timestamp} UTC")
+        # Row 2 — DB-sync freshness (left) + provider/quote markers (right).
+        self._row2_left.update(self._db_sync_marker(self.now))
+        self._row2_right.update(self._provider_marker())

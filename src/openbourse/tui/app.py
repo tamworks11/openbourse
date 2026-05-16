@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -29,11 +30,13 @@ class BourseApp(App[None]):
         providers: Providers | None = None,
         universe: list[tuple[Any, Any]] | None = None,
         history: dict[str, list[Any]] | None = None,
+        last_synced_at: datetime | None = None,
     ) -> None:
         super().__init__()
         self.providers = providers or build_providers()
         self._universe = universe
         self._history = history or {}
+        self._last_synced_at = last_synced_at
 
     def on_mount(self) -> None:
         """Push the screener as the initial screen."""
@@ -42,6 +45,7 @@ class BourseApp(App[None]):
                 providers=self.providers,
                 universe=self._universe,
                 history=self._history,
+                last_synced_at=self._last_synced_at,
             )
         )
 

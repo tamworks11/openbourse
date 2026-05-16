@@ -18,10 +18,17 @@ backed by PostgreSQL.
 
 ## Screens
 
-The main screener — universe stats, candidates table sorted by composite
-score, and a live detail pane that updates as you move the cursor. The
-right pane shows the focused company's metrics, score, verdict, and a
-short business description from the data provider.
+The main screener — universe stats, a candidates table sorted by composite
+score with live **price** and **volume** columns, and a live detail pane
+that updates as you move the cursor. The right pane shows the focused
+company's price, daily **change** / **change %**, **volume** and
+**3-month average volume**, **market cap**, **P/E (TTM)**, **52-week
+change**, the screening fundamentals, score, verdict, and a short business
+description. The market-data fields tick on the quote-poll interval and
+come from Yahoo Finance when available (an em-dash otherwise — thinly
+traded names, or before a row is first polled). P/E comes from the stored
+fundamentals snapshot, so it reflects the last ingest/sync rather than the
+live tick.
 
 ![Screener](docs/screenshots/screener.svg)
 
@@ -63,6 +70,11 @@ candidates list re-runs in place.
 - **Universe ingest** — `bourse universe ingest --source sp500` (or
   `russell2000`, `nasdaq100`, etc.) builds your screening universe from
   Wikipedia + iShares ETF holdings.
+- **One-command force-sync** — `bourse universe sync` refreshes the whole
+  benchmark universe (S&P 500 + Nasdaq-100 + Dow 30, unioned and deduped)
+  in a single call, ignoring snapshot freshness so filters always run on
+  the latest data. Each sync is timestamped; the TUI status bar shows when
+  the database was last synced (UTC).
 - **SQLAlchemy 2.0 async + Alembic** — typed `Mapped[]` models, versioned
   migrations, repository-pattern data access.
 - **Apache 2.0 licensed** — designed to be forked, vendored, and extended.
@@ -98,6 +110,13 @@ poetry run bourse db migrate
 > with `OPENBOURSE_PG_HOST_PORT` in `.env` and update `OPENBOURSE_DATABASE_URL`
 > to match.
 
+> **After pulling updates, re-run `bourse db migrate`.** New releases add
+> Alembic migrations (the latest adds a `sync_runs` table that tracks when
+> the database was last synced). `bourse db migrate` is idempotent — it
+> applies only the migrations your database hasn't seen yet. If you skip
+> it, sync-dependent features fail with `relation "sync_runs" does not
+> exist`.
+
 ### Ingest fundamentals (Yahoo Finance, no API key)
 
 `openbourse` defaults to **yfinance** for fundamentals — completely free,
@@ -121,6 +140,54 @@ poetry run bourse universe ingest --source sp500 --with-history --rate 0.5
 poetry run bourse universe ingest --source sp500 --stale-after 30
 ```
 
+#### Force-sync the whole benchmark universe
+
+To refresh your **entire** benchmark universe in one command — S&P 500,
+Nasdaq-100, and Dow 30 fetched, unioned, and de-duplicated — use `sync`.
+Unlike `ingest`, it always force-fetches every constituent (snapshot
+freshness is ignored) and records the sync time so screening filters run
+on fully up-to-date fundamentals:
+
+```bash
+poetry run bourse universe sync                            # sp500 + nasdaq100 + dow30
+poetry run bourse universe sync -s sp500 -s russell1000    # choose your own sources
+poetry run bourse universe sync --with-history             # also pull annual history
+poetry run bourse universe sync --dry-run                  # preview the ticker union
+```
+
+A source that fails to fetch (e.g. a Wikipedia layout change) is reported
+and skipped — the remaining sources still sync. The run finishes by
+printing the recorded sync time, e.g. `database synced 2026-05-16 21:22:13
+UTC`.
+
+#### Schedule it before the market opens
+
+To keep the database fresh automatically, the bundled `docker compose`
+file ships an optional **`scheduler`** service. It runs `bourse universe
+sync` every weekday at **09:00 US Eastern** — 30 minutes before the 09:30
+open — so the first screen you run each day is on current data.
+
+```bash
+docker compose --profile scheduler up -d --build
+```
+
+This builds the openbourse image (`Dockerfile`) and starts a small
+container that applies any pending migrations, then loops: sleep until the
+next scheduled tick, sync, repeat. It's cross-platform — the same command
+works on Windows, macOS, and Linux — and the schedule is anchored to
+`America/New_York`, so it stays 30 minutes before the open regardless of
+the host's timezone or DST.
+
+```bash
+docker compose logs -f scheduler   # watch it — shows the next run time
+docker compose stop scheduler      # pause automatic syncs
+```
+
+Change the time via `.env` (`OPENBOURSE_SYNC_HOUR` / `OPENBOURSE_SYNC_MINUTE`,
+both in ET). The container must be running at the scheduled time — if the
+machine is asleep or off at 09:00 ET, that day's sync is skipped (it does
+not catch up on the next start).
+
 If you're offline or want to demo the app without network access, the
 bundled fixture dataset still works:
 
@@ -137,8 +204,24 @@ poetry run bourse universe sources
 ### Launch the TUI
 
 ```bash
-poetry run bourse run
+poetry run bourse run            # loads whatever is already in the database
+poetry run bourse run --sync     # force-sync the universe first, then launch
 ```
+
+`--sync` runs the same force-sync as `bourse universe sync` before the TUI
+opens, so the screener's filters start on fresh data. Without it, the app
+loads the last-ingested data — the status bar's **`● DB synced …`** marker
+(top-left, UTC) tells you how stale that is:
+
+- **green dot** — synced within the last 2 hours;
+- **yellow dot** — more than 2 hours stale. Weekend time is excluded, so a
+  Friday-evening sync isn't flagged on Saturday; it goes yellow once
+  ~2 trading hours pass without a refresh;
+- **red `DB never synced`** — the database has never been synced.
+
+The marker also updates live: if the scheduled pre-market sync (or a
+manual `bourse universe sync`) completes while the TUI is open, the marker
+picks it up within a minute and turns green — no restart needed.
 
 Press `?` inside the app for keybindings. Some highlights:
 
@@ -177,10 +260,13 @@ stubbed at any moment.
 bourse run                       Launch the TUI.
 bourse run --screen NAME         Launch with a specific screen
                                  (all, quality_compounders, deep_value, high_growth).
+bourse run --sync                Force-sync the universe, then launch the TUI.
 bourse lookup TICKER             Look up fundamentals for a single ticker.
 bourse lookup TICKER -b          Same, plus an AI-generated brief.
 bourse lookup TICKER --history   Same, plus annual history (persisted to DB).
 bourse universe ingest -s sp500  Bulk-ingest a list of tickers via yfinance.
+bourse universe sync             Force-sync sp500 + nasdaq100 + dow30 with the
+                                 latest data; records the sync time.
 bourse universe sources          List available --source values.
 bourse universe fetch-list NAME  Print a fresh ticker list to stdout.
 bourse db migrate                Apply Alembic migrations to the configured DB.
@@ -274,6 +360,9 @@ src/openbourse/
 alembic/            Migration environment + versioned scripts.
 tests/              pytest suites — unit and integration.
 docs/               Architecture and contribution docs.
+scripts/            Dev/ops helpers — screenshots, the pre-market sync scheduler.
+Dockerfile          Container image used by the compose `scheduler` service.
+docker-compose.yml  Local Postgres + opt-in pre-market sync scheduler.
 ```
 
 See [docs/architecture.md](docs/architecture.md) for the design walkthrough.

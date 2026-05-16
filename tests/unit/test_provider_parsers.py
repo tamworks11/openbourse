@@ -164,6 +164,7 @@ def test_fmp_current_fundamentals_parser() -> None:
             "marketCap": 627_847_920_000,
             "freeCashFlowYieldTTM": -0.005,
             "netDebtToEBITDATTM": 2.44,
+            "peRatioTTM": 28.6,
         }
     ]
     rt_ttm = [{"grossProfitMarginTTM": 0.354}]
@@ -180,3 +181,25 @@ def test_fmp_current_fundamentals_parser() -> None:
     assert round(snap.fcf_yield_pct, 2) == -0.5
     assert round(snap.revenue_growth_pct, 1) == 7.2
     assert snap.price_usd == 124.92
+    assert snap.pe_ratio_ttm == 28.6
+
+
+def test_fmp_current_fundamentals_drops_non_positive_pe() -> None:
+    # A loss-making TTM yields a negative peRatioTTM — not a usable ratio.
+    km_ttm = [{"peRatioTTM": -14.2, "marketCap": 1_000_000}]
+    snap = _parse_current_fundamentals("LOSS", [{"price": 5.0}], km_ttm, [], [])
+    assert snap.pe_ratio_ttm is None
+
+
+def test_yfinance_parse_info_extracts_trailing_pe() -> None:
+    from openbourse.providers.yfinance import _parse_info
+
+    snap = _parse_info("AAPL", {"marketCap": 3e12, "trailingPE": 31.2})
+    assert snap.pe_ratio_ttm == 31.2
+
+
+def test_yfinance_parse_info_pe_is_none_when_missing_or_non_positive() -> None:
+    from openbourse.providers.yfinance import _parse_info
+
+    assert _parse_info("X", {"marketCap": 1e9}).pe_ratio_ttm is None
+    assert _parse_info("LOSS", {"marketCap": 1e9, "trailingPE": -8.0}).pe_ratio_ttm is None
