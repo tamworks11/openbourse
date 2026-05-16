@@ -462,3 +462,25 @@ class TestSources:
         csv = "Fund Holdings as of,...\nNAV,10\n"
         with pytest.raises(RuntimeError, match="iShares CSV layout changed"):
             _parse_ishares_csv(csv, "IWM")
+
+    def test_parse_ishares_csv_detects_html_bot_block(self) -> None:
+        """iShares serves the product webpage to bots — detect HTML and give
+        an actionable error rather than the misleading 'layout changed'."""
+        from openbourse.universe.sources import _parse_ishares_csv
+
+        html = '<!DOCTYPE html>\n<html lang="en-US"><head><title>iShares</title>'
+        with pytest.raises(RuntimeError, match="blocks automated downloads") as exc:
+            _parse_ishares_csv(html, "IWB")
+        message = str(exc.value)
+        # The error must point the user at the manual-download workaround.
+        assert "browser" in message
+        assert "--from" in message
+        assert "ishares.com/us/products/239707" in message
+
+    def test_parse_ishares_csv_detects_html_with_leading_whitespace(self) -> None:
+        from openbourse.universe.sources import _parse_ishares_csv
+
+        # Some responses carry a leading blank line / BOM before <html>.
+        html = "\n\n  <html><body>blocked</body></html>"
+        with pytest.raises(RuntimeError, match="blocks automated downloads"):
+            _parse_ishares_csv(html, "IWM")

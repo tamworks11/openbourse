@@ -108,6 +108,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   off the right edge and appeared missing. The status bar is now a
   genuine two-row header — identity + clock on top, DB-sync + provider
   markers below — so each marker has room to render in full.
+- **iShares Russell sources fail with a clear, actionable error.** iShares
+  added bot protection that serves an HTML page instead of the holdings
+  CSV to automated clients. `--source russell1000/russell2000/russell3000`
+  previously failed with a misleading "CSV layout changed" message; it
+  now detects the HTML response and explains the manual-download
+  workaround (browser download + `bourse universe ingest --from <file>`).
+  See the README's "Ingesting Russell indices manually" section.
 
 ## [0.1.0] - 2026-05-08
 

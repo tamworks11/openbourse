@@ -97,9 +97,22 @@ def test_universe_sync_rejects_unknown_source() -> None:
 
 
 def test_run_command_exposes_sync_flag() -> None:
-    result = runner.invoke(app, ["run", "--help"])
-    assert result.exit_code == 0
-    assert "--sync" in result.stdout
+    """`bourse run` must expose a ``--sync`` option.
+
+    Introspects the command callback rather than scraping ``--help``
+    output: the rendered help is Rich-formatted and its exact bytes vary
+    with terminal width, ANSI support, and Rich version, which made the
+    substring check flaky on CI. The OptionInfo on the callback is the
+    source of truth — if it carries ``--sync``, Typer exposes the flag.
+    """
+    import inspect
+
+    from openbourse.cli import run
+
+    sync_param = inspect.signature(run).parameters.get("sync")
+    assert sync_param is not None, "run() has no 'sync' parameter"
+    option = sync_param.default
+    assert "--sync" in getattr(option, "param_decls", ())
 
 
 def test_alembic_config_resolves_ini_and_url(monkeypatch) -> None:

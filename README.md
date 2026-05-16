@@ -68,8 +68,8 @@ candidates list re-runs in place.
   `openbourse.screening`, fully unit-tested. Filter by `max_risk_score`
   the same way you filter by leverage or market cap.
 - **Universe ingest** — `bourse universe ingest --source sp500` (or
-  `russell2000`, `nasdaq100`, etc.) builds your screening universe from
-  Wikipedia + iShares ETF holdings.
+  `nasdaq100`, `dow30`) builds your screening universe from Wikipedia.
+  Any custom list works via `--from tickers.txt`.
 - **One-command force-sync** — `bourse universe sync` refreshes the whole
   benchmark universe (S&P 500 + Nasdaq-100 + Dow 30, unioned and deduped)
   in a single call, ignoring snapshot freshness so filters always run on
@@ -130,15 +130,22 @@ poetry run bourse universe ingest --source sp500 --limit 10
 # Then backfill a real universe. Pick one:
 poetry run bourse universe ingest --source sp500       # 503 names, ~3 min
 poetry run bourse universe ingest --source nasdaq100   # 101 names, ~30 sec
-poetry run bourse universe ingest --source russell2000 # 1,919 names, ~7 min
-poetry run bourse universe ingest --source russell3000 # 2,921 names, ~10 min
+poetry run bourse universe ingest --source dow30       # 30 names,  ~10 sec
 
-# With history (3-4 annual snapshots per ticker, 4× the calls).
+# With history (8 annual snapshots per ticker, more API calls).
 poetry run bourse universe ingest --source sp500 --with-history --rate 0.5
 
 # Refresh after earnings season — only re-fetch rows older than N days.
 poetry run bourse universe ingest --source sp500 --stale-after 30
 ```
+
+> **Russell 1000/2000/3000 sources are currently degraded.** They pull
+> constituents from iShares ETF holdings CSVs, and iShares has added bot
+> protection that serves an HTML page instead of the CSV to automated
+> clients. `--source russell2000` / `russell3000` will fail with a clear
+> error. The CSV still downloads fine **in a browser** — see
+> [Ingesting Russell indices manually](#ingesting-russell-indices-manually)
+> below.
 
 #### Force-sync the whole benchmark universe
 
@@ -187,6 +194,37 @@ Change the time via `.env` (`OPENBOURSE_SYNC_HOUR` / `OPENBOURSE_SYNC_MINUTE`,
 both in ET). The container must be running at the scheduled time — if the
 machine is asleep or off at 09:00 ET, that day's sync is skipped (it does
 not catch up on the next start).
+
+#### Ingesting Russell indices manually
+
+iShares blocks automated downloads of their ETF holdings CSVs, so the
+`russell1000` / `russell2000` / `russell3000` `--source` values fail. The
+CSV still downloads fine in a browser — fetch it once, convert it to a
+plain ticker list, and ingest from the file:
+
+1. Open the iShares product page and download the holdings CSV via
+   **"Detailed Holdings and Analytics"**:
+   - Russell 1000 — <https://www.ishares.com/us/products/239707/ishares-russell-1000-etf/>
+   - Russell 2000 — <https://www.ishares.com/us/products/239710/ishares-russell-2000-etf/>
+2. Extract the ticker column to a one-per-line text file. The CSV has
+   ~9 metadata rows before the `Ticker,` header — adjust `+11` if your
+   download differs:
+
+   ```bash
+   tail -n +11 ~/Downloads/IWB_holdings.csv | cut -d, -f1 | tr -d '"' \
+     | grep -E '^[A-Z]' > russell.txt
+   tail -n +11 ~/Downloads/IWM_holdings.csv | cut -d, -f1 | tr -d '"' \
+     | grep -E '^[A-Z]' >> russell.txt
+   ```
+3. Ingest from the file with `--from`:
+
+   ```bash
+   poetry run bourse universe ingest --from russell.txt --with-history \
+     --stale-after 0 --rate 0.5
+   ```
+
+`--from` accepts any plain ticker list (one symbol per line, `#`
+comments allowed), so this same path works for any custom universe.
 
 If you're offline or want to demo the app without network access, the
 bundled fixture dataset still works:
@@ -265,6 +303,7 @@ bourse lookup TICKER             Look up fundamentals for a single ticker.
 bourse lookup TICKER -b          Same, plus an AI-generated brief.
 bourse lookup TICKER --history   Same, plus annual history (persisted to DB).
 bourse universe ingest -s sp500  Bulk-ingest a list of tickers via yfinance.
+bourse universe ingest --from F  Ingest a custom one-ticker-per-line file F.
 bourse universe sync             Force-sync sp500 + nasdaq100 + dow30 with the
                                  latest data; records the sync time.
 bourse universe sources          List available --source values.

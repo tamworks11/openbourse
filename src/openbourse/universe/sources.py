@@ -202,8 +202,33 @@ def _fetch_ishares_holdings(url: str, etf: str) -> list[str]:
     return _parse_ishares_csv(response.text, etf)
 
 
+def _ishares_product_url(etf: str) -> str:
+    """Browser-facing product page for an iShares ETF — where the CSV lives."""
+    product_id, slug = ISHARES_FUNDS[etf]
+    return f"https://www.ishares.com/us/products/{product_id}/{slug}/"
+
+
 def _parse_ishares_csv(text: str, etf: str) -> list[str]:
     """Pure-text parser for iShares holdings CSVs."""
+    # iShares added bot protection to the holdings endpoint: it now serves
+    # the product *webpage* (HTML) to automated clients while still
+    # claiming `content-type: text/csv`. Detect that up front so the error
+    # names the real problem instead of blaming a CSV layout change.
+    if text.lstrip()[:200].lower().startswith(("<!doctype", "<html")):
+        raise RuntimeError(
+            f"iShares blocks automated downloads for {etf}: the endpoint "
+            f"returned an HTML page, not a CSV (their bot protection). The "
+            f"CSV still downloads fine in a browser.\n"
+            f"Workaround:\n"
+            f"  1. Open {_ishares_product_url(etf)} and download the "
+            f'holdings CSV ("Detailed Holdings and Analytics").\n'
+            f"  2. Extract just the ticker column to a plain text file, "
+            f"one ticker per line — e.g.:\n"
+            f"     tail -n +11 {etf}_holdings.csv | cut -d, -f1 "
+            f"| tr -d '\"' > {etf.lower()}.txt\n"
+            f"  3. Ingest it: bourse universe ingest --from {etf.lower()}.txt"
+        )
+
     lines = text.splitlines()
     header_idx = next(
         (i for i, line in enumerate(lines) if line.lstrip().startswith("Ticker,")),
