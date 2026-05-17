@@ -1,10 +1,19 @@
 """Generate the SVG screenshots embedded in the README.
 
-Boots the TUI with the bundled seed dataset, drives it through a few
-representative states (main screener, brief screen with charts, filter
-editor modal), and writes each one to ``docs/screenshots/`` as a vector
-SVG. GitHub renders these inline, so they stay sharp at any zoom level
-and don't need to be regenerated when fonts or themes shift.
+Boots the TUI, drives it through a few representative states (main
+screener, brief screen with charts, filter editor modal), and writes each
+one to ``docs/screenshots/`` as a vector SVG. GitHub renders these inline,
+so they stay sharp at any zoom level and don't need to be regenerated when
+fonts or themes shift.
+
+Data sources differ by shot:
+
+* ``screener.svg`` captures the **live database** when one is populated,
+  so the README reflects a real ingested universe. It falls back to the
+  bundled seed fixture when no DB is reachable (e.g. a fresh contributor
+  clone), so the script never hard-fails.
+* ``brief.svg`` and ``filter_editor.svg`` always use the bundled seed
+  fixture — they stay deterministic and reproducible by anyone.
 
 Run with::
 
@@ -31,7 +40,7 @@ from openbourse import config
 
 config.reset_settings_cache()
 
-from openbourse.cli import _seed_history, _seed_universe
+from openbourse.cli import _load_universe_and_history, _seed_history, _seed_universe
 from openbourse.providers import build_providers
 from openbourse.tui import BourseApp
 
@@ -40,15 +49,24 @@ SIZE = (160, 70)  # wide enough for detail pane; tall enough for ROIC + valuatio
 
 
 async def _shoot_screener(out: Path) -> None:
-    """Capture the main screener: stats, candidates table, detail pane."""
-    universe = _seed_universe()
-    history = _seed_history()
-    app = BourseApp(providers=build_providers(), universe=universe, history=history)
+    """Capture the main screener: stats, candidates table, detail pane.
+
+    Pulls the universe from the live database so the screenshot shows a
+    real ingested universe. ``_load_universe_and_history`` falls back to
+    the bundled seed fixture when the DB is empty or unreachable, so this
+    still works on a fresh clone — it just shows the 10 seed tickers then.
+    """
+    universe, history, last_synced_at = await _load_universe_and_history()
+    app = BourseApp(
+        providers=build_providers(),
+        universe=universe,
+        history=history,
+        last_synced_at=last_synced_at,
+    )
     async with app.run_test(size=SIZE) as pilot:
         await pilot.pause()
-        # Move down a couple rows so the cursor highlight + detail pane
-        # is on a row with rich data (CDNS sits at index 1 alphabetically
-        # among the seeded compounders).
+        # Move the cursor down so the detail pane lands on a row with
+        # rich data rather than the top row.
         await pilot.press("down", "down")
         await pilot.pause()
         app.save_screenshot(str(out))
